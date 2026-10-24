@@ -29,7 +29,9 @@ git tag vX.Y.Z; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安�
 
 **`docs/INVARIANTS.md` 必须进包**：AGENTS.md 的路由表指向它，包内若缺这份文件，装包者拿到的就是一张指空的必读清单。同理，AGENTS.md 里不得再引用 `docs/specs/`（本地 gitignored，不随包分发）——需要引证据时引 `docs/INVARIANTS.md` 的行号。
 
-`docs/assets/` 的四张截图**现在进包**（v0.7.0 起）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。四个文件合计约 575 KB，是包体增长的主要来源（`npm pack` 从 143 KB 增到约 660 KB）；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的四条。
+`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。六个文件合计约 900 KB（实测 `npm pack` 总体积 **0.93 MB** / 22 个文件，可用 `npm pack --dry-run --json` 复核），是包体增长的主要来源；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的六条。
+
+**截图必须跟着界面改，不能长期复用**：v0.7.1 之前 README 用的是 v0.6.0 前后的图，图里还画着三档时间窗、7 个 2 的幂桶和已删除的每轮徽标——读者照着旧图找界面会以为装错了版本。改 `.dsh-tokstats-switch` 档位、桶边界、或删掉某个 slot 时，**同批重截对应截图**；判据是「图里的每一处文案都能在 `lib/client.js` 的词典里找到」。截图用无头 Edge + CDP 抓（`PrintWindow` 抓不到 Chromium 的 GPU 合成内容，实测整片空白），宿主 locale 跟 `--lang=en-US` 走，中英各一套。
 
 ## 新增插件（本包的维护模式）
 
@@ -181,9 +183,10 @@ v0.5.0 起初把 promptopt 放在 `conversation.composer.dock`（与 tokprev 预
     | RPC 通道名 | `/dsh-plugins.tokstats` / `/dsh-plugins.promptopt` | `lib/client.js` + `lib/index.js` 两侧契约 |
   - **guard 是这次的防线**：`PK-14` 以 `package.json` 的 `name` 为唯一真源，派生校验 patch 行 `name`、`client.js` 的 `__ModuleLoader__.load({id})`、`ns` 前缀、`data-plugin-css` 前缀。改名时**先补 guard 再动名字**——漏改 `id:` 的形态是「插件 UI 整个消失而 guard 与测试全绿」（ASSESS §3.5 实测）。
   - 早先写的「爆炸半径是 10 个文件」是**代码文件口径**、且描述的是**文本散布面**（`dsh[-_]plugins` 共 144 处 / 16 个文件，含 6 个文档），不是改动面。**不要再用「文件数」当成本代理。**
-- **`engines.dsh` 写精确版本，不写区间**。宿主 `evaluatePluginCompatibility` 的判定是：**有 `engines.dsh` 时它单独决定、忽略 `peerDependencies`**；不满足就整包跳过（`loadProfileDirectory` 把它记进 `skippedBundles`，**不打印任何东西**）。写一条没实测过的区间等于替未知版本放行，而 rc 阶段官方保留破坏权。当前 pin 是 `0.2.1-rc.3`；升级宿主后按 README「支持的 dsh 版本」的三步重验，再抬 pin 并同步本文件「开发所对版本」。
+- **`engines.dsh` 写精确版本，不写区间**。宿主 `evaluatePluginCompatibility` 的判定是：**有 `engines.dsh` 时它单独决定、忽略 `peerDependencies`**；不满足就整包跳过（`loadProfileDirectory` 把它记进 `skippedBundles`，**不打印任何东西**）。写一条没实测过的区间等于替未知版本放行，而 rc 阶段官方保留破坏权。当前 pin 是 `0.2.1-rc.3`；升级宿主后按下面「升级宿主后的三步重验」跑完，再抬 pin 并同步本文件「开发所对版本」。当前实测版本见 `package.json` 的 `engines.dsh`（README 面向使用者，只说明「版本不匹配时插件会静默消失」，不再维护版本表）。
+  - **升级宿主后的三步重验**（宿主契约一旦漂移，表现是插件静默不工作而不是报错，三步缺一不可）：① `node scripts/check-plugin-structure.js` → 输出含 `OK:` 且零 `WARN`（PK-01 / PK-02 / PK-03 / PK-05 / PK-07 / PK-08 / PK-11 / PK-12 全在这里）；② `npm test` → 0 fail（投影单元形状、RPC 信封、词典键集、降级矩阵）；③ 重启 dsh web → 刷新 → 逐个插件目检（这一步只有人能做，前两步都不覆盖「slot 注册了但界面没渲染」）。前两步是秒级的，能省掉绝大多数重启；三步都过了才抬 pin。
   - **这条 pin 已经真实咬过高版本一次（v0.7.0 → 0.7.1 的起因）**：宿主 nightly 升到 `0.2.1-rc.3` 后，`engines.dsh` 仍钉 `0.2.1-rc.2`，`dsh plugin --profile web list` 只给一句 `is incompatible with dsh 0.2.1-rc.3` 的告警，而**运行期宿主启动时一行日志都没有**——三个插件的 UI 整块消失，用户看到的是「插件失效了」。排查顺序因此固定为：① 先跑 `dsh plugin --profile <p> list` 看有没有 incompatible 告警（这是唯一会说话的入口）；② 再比宿主版本（`dsh-runtimes/*/runtime.json` 的 `desktopVersion` 会滞后于 asar 内的真实版本，**以 `@deepseek-ai/dsh-app-boot/package.json` 为准**，`getDshRuntimeVersion()` 读的就是它）。
-  - **抬 pin 不是改一个字符串**：抬之前要按 README 的三步重验（guard → `npm test` → 重启目检三插件），抬的时候 `engines.dsh` 与 `dsh.compatibility.dshReleases` **一起改**。漏改后者已由 guard 的 **PK-15** 拦下（反向验证：pin 写 rc.4 / 删掉 engines / 写成区间三种形态均变红）。
+  - **抬 pin 不是改一个字符串**：抬之前要按上面「升级宿主后的三步重验」（guard → `npm test` → 重启目检三插件），抬的时候 `engines.dsh` 与 `dsh.compatibility.dshReleases` **一起改**。漏改后者已由 guard 的 **PK-15** 拦下（反向验证：pin 写 rc.4 / 删掉 engines / 写成区间三种形态均变红）。
   - `dsh.compatibility.dshReleases` 是**描述性**元数据（**无任何自动化消费方，仅人读**），只列实测过的版本。实测依据（2026-10-24 复核，宿主 `0.2.1-rc.3`）：asar 内 7131 个 `.js` 条目全文扫 `dshReleases` **0 命中**（另有 336 个 unpacked/无 offset 条目跳过）；官方 `dsh-plugin-market` 只从 registry 读 `engines.dsh`；第三方 `dshmarket@1.66.45` 同样 **0 命中**。它和 `engines.dsh` 必须表达同一事实，不能一个说兼容、另一个把整包挡掉。
 - **`icon` 字段**：值是包内相对路径（绝对路径与 `file:` 之类的 scheme 会被宿主拒绝），宿主按 SVG/PNG/JPEG/WebP 读成 data URL 内联，**上限 256 KiB**，且必须留在 manifest 所在目录内。当前 `icon.svg` 与侧栏图标同一造型、单色 `currentColor`。`files` 必须含它，否则 git 安装后读不到（宿主此时只回一条 `meta.error`，界面表现为没图标）。
   - 另有一份**同造型的位图** `docs/assets/icon-180.png`（180×180 RGBA，品牌色 `#4D6BFE` 写死）：社区目录只接受 GitHub 托管的**位图**（SVG 与第三方图床会被拒），它只服务目录卡片，宿主侧仍然读 `icon.svg`。生成方式是无头 Edge 渲染——原 SVG 的 `currentColor` 单独渲染时无继承色会变黑，必须替换成品牌色再截图；宿主侧的 `currentColor` 不用改。
