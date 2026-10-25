@@ -1838,3 +1838,299 @@ test("样式：热力图折叠格用斜纹 + 主题变量，且不复用柱图�
 	assert.match(gridRule[1], /grid-template-rows:repeat\(7,1fr\)/, "固定 7 行（周一在最上）");
 	assert.match(gridRule[1], /grid-template-columns:repeat\(12,1fr\)/, "12 列 = 12 周");
 });
+
+// ── 第五批：单日模式（TS-29；AC-10）────────────────────────────────────────
+//
+// 单日模式改的是**既有卡片的渲染条件**，而不只是新增一块（PLAN §1）。这一组的
+// 失败模式是「数字看起来对、但其实在复述」：
+// - 副值沿用「日均」时，`days = 1` 让副值等于主值，四卡只剩三份信息（TS-17）；
+// - 周趋势卡在单日下只剩一行，而那一行的周合计与 totals 完全相同（裁决 A）；
+// - 点进折叠日时 totals 是 0，照常渲染会让读者看到「这一天一次都没用过」——谎报。
+
+/**
+ * 单日模式的测试装配：一份 84 天 heatDaily + 一个指定的「目标日」。
+ *
+ * RPC 桩按请求里有没有 `day` 分别回两种形状：区间模式（多天）与单日模式
+ * （一天），这样「面板整体重算成那一天的数」这件事是被真实驱动的。
+ */
+function makeSingleDayFixture({ targetOffset = -3, targetCalls = 2430, otherCalls = 100 } = {}) {
+	const target = dayOffset(targetOffset);
+	const heatDaily = [];
+	for (let i = 83; i >= 0; i -= 1) {
+		heatDaily.push({
+			day: dayOffset(-i),
+			calls: i === -targetOffset ? targetCalls : otherCalls,
+			in: 1000, cr: 0, cw: 0, out: 10,
+		});
+	}
+	const heatTotal = heatDaily.reduce((sum, row) => sum + row.calls, 0);
+	const rpc = makeRpcStub();
+	rpc.respond((call) => {
+		const single = typeof call.payload?.day === "string";
+		const day = single ? call.payload.day : target;
+		return {
+			ok: true,
+			value: makeSummary({
+				buckets: Array.from({ length: 6 }, (_, i) => (i === 2
+					? { calls: 5, in: 500, cr: 0, cw: 0, out: 0 }
+					: { calls: 0, in: 0, cr: 0, cw: 0, out: 0 })),
+				daily: single
+					? [{ day, calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 }]
+					: [{ day: target, calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 },
+						{ day: dayOffset(-2), calls: otherCalls, in: 1000, cr: 0, cw: 0, out: 10 }],
+				weekly: [{ weekStart: dayOffset(-6), calls: targetCalls + otherCalls, in: 2000, cr: 0, cw: 0, out: 20 }],
+				workspaces: [{ path: "D:\\proj\\alpha", calls: targetCalls, in: 1000, out: 10, cr: 0, cw: 0 }],
+				routes: [{ rt: "x/y", calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 }],
+				totals: { calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 },
+				windowStart: single ? day : dayOffset(-6),
+				generatedAt: Date.now(),
+				windowDays: single ? 1 : 7,
+				coverage: { sessions: 1, skipped: 0 },
+				epoch: null,
+				heatDaily,
+				...(single ? { day, dayFolded: false } : {}),
+			}),
+		};
+	});
+	return { rpc, target, targetCalls, heatTotal };
+}
+
+/** 在渲染树上找目标日那一格并点它（进单日模式）。 */
+function clickDayCell(tree, day) {
+	const label = tokstatsLabel(day);
+	const cell = heatRealCellsOf(tree).find((n) => String(n.props.title).startsWith(label + "："));
+	assert.ok(cell, `应找到 ${day} 那一格（${label}）`);
+	cell.props.onClick();
+}
+
+/** 渲染 → 点格 → 再渲染，返回单日模式的树。 */
+async function enterSingleDay(react, main, t, day) {
+	const before = await renderPanelClean(react, main, { t });
+	clickDayCell(before, day);
+	return renderPanelClean(react, main, { t });
+}
+
+/**
+ * `renderPanel` 的干净版：渲染前后都对齐 hook 序号与 effect 列表。
+ *
+ * 为什么需要（两个桩语义问题，不是实现的问题）：
+ * 1. **hook 序号**：`renderPanel` 末尾的 `renderDeep(main.comp(props))` 会继续推进
+ *    `_idx` 而不重置，下一次 `renderPanel` 开头的 `main.comp` 就从那个陈旧序号起算，
+ *    `useState` / `useRef` 的槽位整体错位（`singleDay` 会读到别的槽的值）。
+ * 2. **effect 累积**：浅渲染的 `_effects` 是累积的，上一次深渲染留下的 effect 会在
+ *    下一次 `runEffects` 里先跑——那时闭包捕获的还是**旧**的 `singleDay`，于是
+ *    请求里看不到 `day`，测的变成「点之前发了什么」。
+ *
+ * 真实 React 每次渲染都会重跑 effect 并按依赖清理，桩没有这层语义，故显式对齐。
+ */
+async function renderPanelClean(react, main, props) {
+	react.reset();
+	react._effects.length = 0;
+	const tree = await renderPanel(react, main, props);
+	react._effects.length = 0;
+	return tree;
+}
+
+test("AC-10：单日模式下四档按钮全部置灰（置灰不隐藏）", async () => {
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const tree = await enterSingleDay(react, main, t, fixture.target);
+	const switches = nodesOf(tree).filter((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
+	assert.equal(switches.length, 4, "四档按钮应仍在（置灰不隐藏，避免工具条高度变化）");
+	assert.ok(switches.every((n) => n.props.disabled === true), "单日模式下四档全部置灰");
+	// 区间模式下它们必须是可用的（否则这条断言在「永远 disabled」的实现下也会绿）。
+	const fresh = setupClient({ rpc: makeSingleDayFixture().rpc });
+	const rangeOnly = await renderPanelClean(fresh.react, fresh.main, { t: fresh.t });
+	const rangeSwitches = nodesOf(rangeOnly).filter((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
+	assert.ok(rangeSwitches.every((n) => n.props.disabled !== true), "区间模式下四档必须可用");
+});
+test("AC-10：单日下日柱图隐藏、周趋势卡隐藏（裁决 A）", async () => {
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const rangeTree = await renderPanel(react, main, { t });
+	// 对照：区间模式下两张卡都在（否则下面的「隐藏」可能是它们从来没渲染过）。
+	assert.ok(nodesOf(rangeTree).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-chartPlot")),
+		"区间模式应有日柱绘图区");
+	assert.ok(nodesOf(rangeTree).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-table")),
+		"区间模式应有周趋势表");
+	clickDayCell(rangeTree, fixture.target);
+	const single = await renderPanel(react, main, { t });
+	assert.ok(!nodesOf(single).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-chartPlot")),
+		"单日下日柱图必须隐藏（只剩一根孤柱，热力图已覆盖该职责）");
+	assert.ok(!nodesOf(single).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-table")),
+		"单日下周趋势卡必须隐藏（那一行周合计与 totals 完全相同，是复述主值）");
+	// 桶分布 / 模型排行 / 工作区排行仍要在（正常重算成那一天）。
+	assert.ok(nodesOf(single).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-meter")),
+		"桶分布与排行卡应照常渲染");
+});
+
+test("AC-10：单日下 KPI 副值改「占 84 天份额」，四卡副值两两不等（不复述主值）", async () => {
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const tree = await enterSingleDay(react, main, t, fixture.target);
+	const hints = nodesOf(tree)
+		.filter((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-kpiHint")
+		.map((n) => textOf(n));
+	assert.equal(hints.length, 4, "四张卡各有副值");
+	// TS-17 的核心判据：四卡副值两两不等。`days = 1` 时「日均」等于主值本身，
+	// 那会让「调用次数」卡的副值与主值重复——本变更改的就是这一点。
+	assert.equal(new Set(hints).size, 4, `四卡副值必须两两不等，实际 ${JSON.stringify(hints)}`);
+	// 「调用次数」副值必须是份额，且**不是**「日均」。
+	assert.match(hints[0], /^占 84 天 \d+%$/, `调用次数副值应为份额，实际 ${hints[0]}`);
+	assert.ok(!/日均/.test(hints[0]), `单日下不得出现「日均」（复述主值），实际 ${hints[0]}`);
+	// 份额的分母必须是 heatDaily 的合计（不是 totals）：
+	// totals = 2430，heatTotal = 2430 + 83×100 = 10730 → 22.6% → 四舍五入到 23%。
+	assert.equal(hints[0], "占 84 天 23%", `份额应为 2430/10730≈23%，实际 ${hints[0]}`);
+	// 反例守卫：若误用 totals 当分母会恒得 100%，这里显式排除那个形态。
+	assert.ok(!/100%/.test(hints[0]), "份额不得是 100%（那说明分母取了 totals）");
+});
+
+test("AC-10：单日模式请求带 day，且仍带 windowDays（host 按裁决 C 覆盖）", async () => {
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	await enterSingleDay(react, main, t, fixture.target);
+	const summaries = fixture.rpc.calls.filter((call) => call.endpoint === "summary");
+	const last = summaries[summaries.length - 1];
+	assert.equal(last.payload.day, fixture.target, "单日模式的请求必须带 day");
+	assert.equal(typeof last.payload.windowDays, "number", "仍要带 windowDays（client 不知道 host 的优先级规则）");
+});
+test("AC-10：面包屑出现，点「全部区间」退出单日模式", async () => {
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const single = await enterSingleDay(react, main, t, fixture.target);
+	const crumb = nodesOf(single).find((n) => String(n.props.className ?? "").includes("dsh-tokstats-crumb"));
+	assert.ok(crumb, "单日模式应出现面包屑（退出入口）");
+	// 面包屑可见文字是日期；整句说明走 aria-label（不占工具条宽度）。
+	assert.ok(textOf(crumb).includes(tokstatsLabel(fixture.target)), "面包屑应显示选中日期");
+	assert.ok(textOf(crumb).includes("全部区间"), "面包屑应带「全部区间」退出按钮");
+	const exit = nodesOf(crumb).find((n) => String(n.props.className ?? "").includes("dsh-tokstats-crumbExit"));
+	assert.ok(exit, "退出按钮应存在");
+	exit.props.onClick();
+	const back = await renderPanel(react, main, { t });
+	assert.ok(!nodesOf(back).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-crumb")),
+		"退出后面包屑消失");
+	const switches = nodesOf(back).filter((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
+	assert.ok(switches.every((n) => n.props.disabled !== true), "退出后四档恢复可用");
+});
+
+test("AC-10：点已选中的格退出单日模式（第二个出口）", async () => {
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const single = await enterSingleDay(react, main, t, fixture.target);
+	// 再点同一格：应退出（PLAN §3.3.1 的出口之一）。
+	clickDayCell(single, fixture.target);
+	const back = await renderPanel(react, main, { t });
+	assert.ok(!nodesOf(back).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-crumb")),
+		"再点同一格应退出单日模式");
+});
+
+test("TS-29：点进折叠日**不显示任何数字**，只显示折叠说明（防谎报）", async () => {
+	// 这是单日模式最危险的形态：折叠日的明细在读取期被 E1 排除，host 返回的
+	// totals 是 0。若照常渲染 KPI 四卡与排行，读者看到「这一天一次都没用过」——
+	// 而真相是「有量、但被归并进区间、按日拆不出来」。
+	const rpc = makeRpcStub();
+	const heatDaily = [];
+	for (let i = 83; i >= 0; i -= 1) heatDaily.push({ day: dayOffset(-i), calls: 10, in: 100, cr: 0, cw: 0, out: 1 });
+	const foldedDay = dayOffset(-30);
+	rpc.respond(() => ({
+		ok: true,
+		value: makeSummary({
+			buckets: Array.from({ length: 6 }, () => ({ calls: 0, in: 0, cr: 0, cw: 0, out: 0 })),
+			daily: [], weekly: [], workspaces: [], routes: [],
+			// 折叠日：totals 全零（明细被 E1 排除）。
+			totals: { calls: 0, in: 0, cr: 0, cw: 0, out: 0 },
+			windowStart: foldedDay, generatedAt: Date.now(), windowDays: 1,
+			coverage: { sessions: 1, skipped: 0 },
+			epoch: { start: dayOffset(-40), end: dayOffset(-20), calls: 999 },
+			heatDaily,
+			day: foldedDay, dayFolded: true,
+		}),
+	}));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	// ① 必须出现折叠说明。
+	assert.ok(textOf(tree).includes("已折叠"), "折叠日应显示「已折叠」说明");
+	// ② **不得出现任何 KPI 数字**（显示偏低数字是谎报）。
+	const kpiValues = nodesOf(tree).filter((n) => typeof n.props.className === "string"
+		&& n.props.className === "dsh-tokstats-kpiValue");
+	assert.equal(kpiValues.length, 0, `折叠日不得渲染 KPI 数字，实际 ${kpiValues.length} 个`);
+	// ③ 也不得落进「暂无数据」空态（那句「还没有 usage 记录」同样是谎报）。
+	assert.ok(!textOf(tree).includes("暂无数据"), "折叠日不得显示「暂无数据」");
+	// ④ 热力图本身仍要渲染（它承担说明折叠区的职责）。
+	assert.ok(heatGridOf(tree), "折叠日仍要渲染热力图");
+});
+
+test("TS-29：折叠格不可点（渲染时即判定，不需要先请求）", async () => {
+	const rpc = makeRpcStub();
+	const heatDaily = [];
+	for (let i = 83; i >= 0; i -= 1) heatDaily.push({ day: dayOffset(-i), calls: 10, in: 100, cr: 0, cw: 0, out: 1 });
+	const foldedDay = dayOffset(-30);
+	rpc.respond(() => ({
+		ok: true,
+		value: makeSummary({
+			daily: [{ day: dayOffset(-1), calls: 10, in: 100, cr: 0, cw: 0, out: 1 }],
+			weekly: [{ weekStart: dayOffset(-1), calls: 10, in: 100, cr: 0, cw: 0, out: 1 }],
+			totals: { calls: 10, in: 100, cr: 0, cw: 0, out: 1 },
+			windowStart: dayOffset(-6), generatedAt: Date.now(), windowDays: 7,
+			epoch: { start: dayOffset(-40), end: dayOffset(-20), calls: 999 },
+			heatDaily,
+		}),
+	}));
+	const { react, main, t } = setupClient({ rpc });
+	const rangeTree = await renderPanelClean(react, main, { t });
+	const label = tokstatsLabel(foldedDay);
+	const foldedCell = heatRealCellsOf(rangeTree).find((n) => String(n.props.title).startsWith(label + "："));
+	assert.ok(foldedCell, "应找到折叠格");
+	// 折叠格**渲染时就不可点**（用 epoch.start/end 判定，不需要先请求，PLAN §3.3.4）。
+	assert.equal(foldedCell.props.disabled, true, "折叠格不可点（点进去会显示偏低的数）");
+	// 而且它压根没有 onClick（不是「有 handler 但被 disabled 挡住」——那在键盘或
+	// 程序化触发下仍可能进单日模式）。这是更强的判据。
+	assert.equal(foldedCell.props.onClick, undefined, "折叠格不得挂 onClick");
+	// 请求里不得出现 day（没进单日模式）。
+	const summaries = rpc.calls.filter((call) => call.endpoint === "summary");
+	assert.ok(summaries.every((call) => call.payload.day === undefined), "折叠格点击不得触发单日请求");
+});
+
+test("TS-29：折叠格不可点、零日不可点，两者 tooltip 各写明原因（AC-10 / SPEC D10）", async () => {
+	const rpc = makeRpcStub();
+	const heatDaily = makeHeatDaily([{ offset: -1, calls: 5 }]);
+	const epoch = { start: dayOffset(-40), end: dayOffset(-20), calls: 99 };
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, epoch, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const cells = heatRealCellsOf(tree);
+	// 零日：tooltip 写「无记录」。
+	const zero = cells.find((n) => String(n.props.title).includes("无记录"));
+	assert.ok(zero, "应有零日格");
+	assert.equal(zero.props.disabled, true, "零日不可点");
+	assert.match(String(zero.props.title), /无记录/, "零日 tooltip 写明「无记录」（不可选原因）");
+	// 折叠格：tooltip 写「已折叠…不可按日拆分」。
+	const folded = cells.find((n) => n.props.className.includes("heatFolded"));
+	assert.ok(folded, "应有折叠格");
+	assert.equal(folded.props.disabled, true, "折叠格不可点");
+	assert.match(String(folded.props.title), /已折叠/, "折叠格 tooltip 写明「已折叠」（不可选原因）");
+	assert.ok(!String(folded.props.title).includes("无记录"), "折叠格不得写「无记录」");
+});
+
+test("TS-29：单日模式下工作区过滤器与 day 叠加（两个过滤器同时生效）", async () => {
+	// SPEC D14：选了工作区，热力图也只画那个工作区的天；单日 + 工作区叠加。
+	// 这里钉住「两个字段同时出现在请求里」——host 本来就同时支持。
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const rangeTree = await renderPanelClean(react, main, { t });
+	// 切到一个工作区。
+	const select = nodesOf(rangeTree).find((n) => typeof n.props.className === "string"
+		&& n.props.className === "dsh-tokstats-select");
+	assert.ok(select, "工作区选择器应存在");
+	select.props.onChange({ target: { value: "D:\\proj\\alpha" } });
+	const withWs = await renderPanelClean(react, main, { t });
+	clickDayCell(withWs, fixture.target);
+	await renderPanelClean(react, main, { t });
+	const summaries = fixture.rpc.calls.filter((call) => call.endpoint === "summary");
+	const last = summaries[summaries.length - 1];
+	assert.equal(last.payload.day, fixture.target, "单日模式仍带 day");
+	assert.equal(last.payload.workspace, "D:\\proj\\alpha", "工作区过滤器仍生效（两个过滤器叠加）");
+});
