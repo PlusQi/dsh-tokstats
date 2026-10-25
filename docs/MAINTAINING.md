@@ -92,10 +92,11 @@ UI slot `conversation.composer.dock`（**只此一个**：`conversation.chat.ass
 - **汇总**：面板打开时经 RPC 现算。逐会话先 `cachedSnapshot(meta, ["dsh-plugins.tokstats"])`（零 I/O），取不到才 `readSession` + `coldSnapshot` 冷折叠兜底。**活会话（`record.live === true`）跳过缓存**直接冷读——官方检查点可能滞后于日志且其 `asOfSeq` 无法与调用方稍后打开的日志关联（实测踩到 fork 会话少报 80%）。根工作区在汇总侧按 `listSessions()` 的 header 链解析（`init` 拿不到 headersById）。
 - **汇总输出形状**（RPC `summary` 端点返回值，面板唯一消费面）：
   ```
-  { buckets[6], daily[], weekly[], routes[], workspaces[], totals, windowStart, windowDays, generatedAt, workspace?,
-    coverage: { sessions, skipped }, epoch: { end, calls } | null }
-  totals / 每个 daily 行 / 每个 route 行 / 每个 workspace 行：{ calls, in, cr, cw, out }
+  { buckets[6], daily[], weekly[], heatDaily[], routes[], workspaces[], totals, windowStart, windowDays, generatedAt, workspace?,
+    coverage: { sessions, skipped }, epoch: { start, end, calls } | null, day?, dayFolded? }
+  totals / 每个 daily 行 / 每个 heatDaily 行 / 每个 route 行 / 每个 workspace 行：{ calls, in, cr, cw, out }
   route 行额外带 rt；未标注行的 rt 是空串
+  day 是请求入参的回显；dayFolded 只在 day 存在时出现
   ```
   - **`coverage` 与 `epoch` 是本变更新增的两个纯增量字段**（TS-21 / TS-22），语义分别是「这次请求的覆盖率」与「本次聚合是否把折叠历史并入了某个代表日」：
     - `coverage.sessions` = 通过 `header.id` 校验**且通过 workspace 过滤**的会话数；`coverage.skipped` = 其中 `summary === undefined` 的条数（日志读不出来）。两条恒等约束：`sessions - skipped` 必须等于实际贡献了数字的会话数；**分母与分子同源**——切到单个工作区时别的工作区的会话不进分母，否则页脚会写「已统计 50 个」而数字只来自 2 个。
@@ -105,6 +106,14 @@ UI slot `conversation.composer.dock`（**只此一个**：`conversation.chat.ass
     - **两个字段都不进投影状态**（不在 `state` / `wire.view` 里），因此**不抬 `stateVersion`、不需要清缓存**——这正是 TS-03 举的反例：只给聚合输出加字段不需要抬版本。`wire.view` 键集仍必须是 `w` / `e` / `rows`，那条既有断言若变红说明字段被误塞进状态。
     - 旧 host 消费方（读不到这两个字段）不受影响：纯增量、可缺省，client 走 `undefined` 分支（与 `routes` / `daily` 同一手法）；新 client + 旧 host 时整句不渲染、不打标、不抛错。
   - **client 侧消费（第二批）**：页脚渲染 `已统计 N 个会话`，`skipped > 0` 时追加 `· 跳过 M 个（日志不可读）`；`skipped === 0` **不渲染**那半句（不写「跳过 0 个」这种假零）。日柱里代表日落在该列区间的柱子带 `dsh-tokstats-barEpoch` 类（斜纹 + 次要底色）并在 tooltip 写明「含折叠历史（区间末归并）· N 次」。
+  - **热力图与单日模式（第四批，TS-28 / TS-29）**：本批给 `summary` 端点加了**一个并列入参**（`day`）与**三个纯增量输出字段**（`heatDaily` / `epoch.start` / `dayFolded`），不改折叠策略、不进投影状态。
+    - **`day` 入参与优先级**：`day` 存在时**覆盖** `windowDays`（SPEC 裁决 C，显式裁决不是实现巧合）。它**不改** TS-20 的「四档共用 `windowDays` 一个入参」契约——client 在单日模式下**仍会传 `windowDays`**（它不知道 host 的优先级规则，传了也无害），所以两者必须能并存：若改成「同时传就报错」，面板在单日下会整块空态，比「静默按 day 算」糟得多。**明细过滤必须双端钳**（`if (day !== undefined && cell.d !== day) continue;`）——只把 `windowStart` 换成 `day` 的语义是「下界」，会把 day 之后的每一天都放进来，多报且看起来完全正常（`AC-1` 用例名里的「双端钳」就是钉这个）。非法 `day`（不合 `^\d{4}-\d{2}-\d{2}$`）按 `undefined` 处理，不抛错、也不退化成整窗。
+    - **`heatDaily` 恒 84 天**：固定窗口（`TOKSTATS_HEATMAP_DAYS = 84`），**不跟 `request.windowDays` 走**——否则切到「近 7 天」时热力图会缩成 7 格，失去「稳定时间轴」职责。取法是**同请求多带一次聚合**（复用同一份 `entries` 再跑一次 `tokstatsAggregate`，实测增量 **0.021 ms**）而不是独立发 RPC：宿主 `listSessions` 实测 **58–803 ms** 是单次请求里最贵的一段，而它对两个窗口**完全相同**，独立请求等于把已算好的东西再走一遍。单日模式下照常返回 84 天（**不特判**，SPEC D15：为它写分支反而增加状态机 bug 面）。
+    - **`epoch.start`**：新增的纯增量字段，client 用它把热力图的折叠区截断成「不可按日拆」（`[start, end)`）。不加的话折叠区会被渲染成「无记录」——那天有量、只是被 E1 归并进区间了，那是谎报。多个会话各有不同 `start` 时取**最早**（区间端点互不重叠，取最小保证是真实区间起点）；`start` 缺失时回落成 `end` 自身（宁可把折叠区截成空区间，也不给错位起点）。
+    - **`dayFolded`**：`day` 落在某会话 `[start, end)` 内时为 `true`（多会话取**或**），且**不把 epoch 合计挂到任何单日上**（区间合计不是那天的真实用量），但 epoch 端点仍要报出来（client 靠它截断热力图）。字段只在 `day` 存在时出现——旧 client 读不到它，纯增量。
+    - **单日页脚必须换文案**：页脚区间右端取「今天」、`windowStart` 在单日下等于所选日，于是会写成「10/20 – 10/25」而面板里全是 10/20 的数——读者会以为面板算错了区间。单日下改为只显示那一天并标明「单日」（词典键 `foot.rangeSingle`），且**不得出现 `–` 连接**。这条是目检才发现、浅渲染拦不住的形态，已补断言。
+    - **client 侧约定**：热力图折叠格用 `.dsh-tokstats-heatFolded`，**不复用**柱图的 `.dsh-tokstats-barEpoch`——两者是不同图形元素，共用类名会让「改柱图的折叠样式」意外改到热力图（有用例断言它不得出现柱图类名）。网格必须 `grid-auto-flow:column` + `grid-template-rows:repeat(7,…)`（配 `grid-template-columns:repeat(12,…)`），否则 12 个格子会横排成「十二个周一」；DOM 顺序是「一周七天连排」，靠 `grid-auto-flow` 才转成列。**格子必须有尺寸上限**（`minmax(0,34px)` 双向钳 + `justify-content:center`）：纯 `1fr` 在整行卡片里把每格拉到约 95px，热力图变成七行巨大色块、把下面所有卡片挤出首屏（实测全宽 1600×1000 下整屏只剩热力图），封顶后的余量必须两侧均分否则图挤在左缘；图例的 `justify-content` 必须与网格一致（实测全宽下错开约 390px，读起来像两个无关元素）。三条都是「能看但读错」的形态，由样式断言钉住（含「不得退回纯 `1fr`」的反向断言）。
+    - **不抬 `stateVersion`、不清缓存**：与 TS-03 的反例同构——只加聚合输出字段与请求入参，**不进投影状态**。`wire.view` 键集仍必须是 `w` / `e` / `rows`，`heatDaily` / `epoch.start` / `dayFolded` **都不得**进 `state`（TS-01 / TS-28 既有断言兜底）。
   - **日柱图的结构约定（第三批，TS-23）**：`.dsh-tokstats-chart` = 纵轴刻度列 `.dsh-tokstats-axisY`（定宽 44px、与绘图区同为 112px 高）+ `.dsh-tokstats-chartMain`（绘图区 `.dsh-tokstats-chartPlot` + 横轴 `.dsh-tokstats-axis`）。
     - **纵轴刻度必须与绘图区同高、且不共用容器**：刻度按 `bottom:70.7%` 绝对定位，参照系是所在盒子的高度。若把横轴放进同一个盒子，刻度会以「绘图区 + 横轴」为基准而上移——柱顶刻度会漂到柱体中部。
     - **刻度位置按平方根刻度算**：峰值在 `100%`、`峰值÷2` 在 `sqrt(0.5)=70.7%`、`0` 在 `0%`。等距三档（100/50/0）会让读者按线性读，而柱高是 `sqrt(calls/peak)`——两者对不上就是「轴在撒谎」。网格线 `.dsh-tokstats-gridLine` 与刻度共用同一组 bottom 值，**改一处必须改两处**。

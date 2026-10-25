@@ -58,6 +58,7 @@ How many tokens were spent, and who spent them?
 | --- | --- |
 | **Four metric cards** | How much did this window use? How much did caching save? |
 | **Daily calls** | Which day was heavy? Where is the peak? |
+| **Last 12 weeks** | Which days were active, which were idle? Click a day to see just that day |
 | **Context length distribution** | How long are my requests? How much sits in long ones? Billed input binned into six tiers: `[0,8K)` / `[8K,32K)` / `[32K,128K)` / `[128K,256K)` / `[256K,512K)` / `[512K,∞)` |
 | **Trend (weekly)** | Is this week heavier than last? Weekly totals always add up to the grand total, so they cannot disagree |
 | **Models** | Which model carries the usage? Counted by `provider/model`; samples with no route land in "Unattributed" placed last, so the rows add up to the total |
