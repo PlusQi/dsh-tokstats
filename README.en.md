@@ -50,9 +50,7 @@ The official ContextMeter already shows how long the context is. What it does no
 
 How many tokens were spent, and who spent them?
 
-![tokstats panel at a glance (sample data)](./docs/assets/tokstats-hero.png)
-
-![tokstats full panel (sample data)](./docs/assets/tokstats-en.png)
+![tokstats panel (sample data)](./docs/assets/tokstats-en.png)
 
 "Token usage stats" in the sidebar opens a full panel:
 

@@ -29,7 +29,7 @@ git tag vX.Y.Z; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安�
 
 **`docs/INVARIANTS.md` 必须进包**：AGENTS.md 的路由表指向它，包内若缺这份文件，装包者拿到的就是一张指空的必读清单。同理，AGENTS.md 里不得再引用 `docs/specs/`（本地 gitignored，不随包分发）——需要引证据时引 `docs/INVARIANTS.md` 的行号。
 
-`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。六个文件合计约 690 KB（其中 tokstats 两张约 380 KB，`--dpr 1.6` 出的 1600×1884），是包体增长的主要来源；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的六条（`npm pack --dry-run --json` 可复核实际体积）。
+`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。六个文件合计约 640 KB（其中 tokstats 两张约 320 KB，`--dpr 1.6` 出的宽 1536、高随内容），是包体增长的主要来源；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的六条（`npm pack --dry-run --json` 可复核实际体积）。
 
 **截图必须跟着界面改，不能长期复用**：v0.7.1 之前 README 用的是 v0.6.0 前后的图，图里还画着三档时间窗、7 个 2 的幂桶和已删除的每轮徽标——读者照着旧图找界面会以为装错了版本。改 `.dsh-tokstats-switch` 档位、桶边界、或删掉某个 slot 时，**同批重截对应截图**；判据是「图里的每一处文案都能在 `lib/client.js` 的词典里找到」。
 
@@ -40,11 +40,11 @@ node scripts/render-screenshots.mjs --lang zh   # → docs/assets/tokstats.png
 node scripts/render-screenshots.mjs --lang en   # → docs/assets/tokstats-en.png
 ```
 
-- **数据是脚本内固定的示例**（模型 `example/*` / `demo/*`、工作区 `D://projects//*`、128 个会话）：真宿主截图必然带本机的模型名、工作区路径与会话标题，那些不该进公开仓库；固定示例也让任何人跑出来的图一致。
+- **数据是脚本内固定的示例**（模型 `example/*` / `demo/*`、工作区 `D://projects//*`、128 个会话）：真宿主截图必然带本机的模型名、工作区路径与会话标题，那些不该进公开仓库；固定示例也让任何人跑出来的图一致。**模型排行 6 条是效果图的高度预算**（市场卡片单张全图，双列贪心随行数重排），长排行场景由测试夹具覆盖。
 - **渲染走真实产物**：脚本经 `test/client-harness.mjs` 捕获真实 `lib/client.js`，用真实组件树 + 真实 CSS 落成静态页，再用无头 chromium 截图——手抄 DOM 只能证明「抄的那份能对齐」。主题 token 取自 `app.asar` 的两个主题块（`body` = 亮色、`body[data-ds-dark-theme]` = 暗色），`--theme light` 可出亮色版。
 - **默认是「近 30 天」档**（`--range` 可换）：这一档能同时看到逐日柱图、周趋势条列表（含本周「进行中」）与自适应两列，信息最全；缺省「当日」档看不到周趋势卡，不适合当效果图。
 - 需要指定浏览器时用 `--chrome <path>`（或 `CHROME_PATH`），否则按 Playwright 的缓存目录找；找不到时退回 PATH 上的 `chrome`。
-- 尺寸固定 `960×1160 @1.6x`（输出 1600×1884）：`--dpr 1` 在 HiDPI 屏上发虚，`--dpr 2` 体积翻倍而 README 显示宽度只有约 800px。
+- 宽固定 960、高随内容（两遍截图）：第一遍用 `--dump-dom` 读页面尾部写入的 `data-shot-h`（`#app` 自适应后的实际高度），第二遍按该高度设 `--window-size`；量不到时回退到估算定高。`--dpr 1.6`（输出宽 1536）：`--dpr 1` 在 HiDPI 屏上发虚，`--dpr 2` 体积翻倍而 README 显示宽度只有约 800px。
 
 ## 新增插件（本包的维护模式）
 
@@ -272,8 +272,8 @@ barePackageName(specifier)                        ← 必须是裸包名
 | 「宿主要求未知」chip | 市场读目录条目的 engines 信息，而条目 schema 没有该字段——`package.json` 的 `engines.dsh` 不会被采集 | 仓库侧无解；发 npm（registry manifest 天然带 engines）或找目录维护者 |
 
 - 收录事实（2026-10-25 核验）：条目 `PlusQi/dsh-tokstats`，`added 2026-10-23`，category `usage`，安装命令 `github:PlusQi/dsh-tokstats`（未固定 ref，默认分支最新）。另一家目录 dshpluginhub.ai 的收录停留在旧名 `dsh-plugins` + pre-rename commit，**勿以它为准**。
-- 截图序按「卡片可读性」排：宽幅在前（tokprev / promptopt / hero），近方形全图垫底——卡片首屏只展示前两张。
-- 内容多的面板可用「总览 + 详情」两张刻意图覆盖全部卡片（当前 `tokstats-hero` + `tokstats-detail`）：单图塞全会退回竖比例、卡片里照样糊；裁切带落在**行边界**上，读作滚动中的面板而非残缺；无卡头的续行（如 detail 顶部的模型排行剩余行）只服务市场卡片，不要单独进 README。
+- 截图序按「首屏不出现同屏重复」排：tokprev → tokstats 全图 → promptopt → 各英文版。原顺序首屏是中/英两张近乎相同的竖图，白费一轮播位；卡片首屏只展示前两张。
+- 面板类插件用**单张全图**（2026-10-26 维护者裁决：一张完整面板 > 「总览 + 详情」两张横图）。全图的高度预算靠渲染夹具的行数控制——`render-screenshots.mjs` 的模型排行 6 条，双列贪心随行数重排；行数越多底边越低、比例越竖，在市场卡片里越糊。
 - 可选大招（未做）：打 GitHub Release 预构建 tarball + 条目加 `tarball:` 字段，市场优先展示它、免 `allowBuilds` 警告；发 npm 则连 engines chip 一起解掉。两者都动「不发 registry」的既定发布线，需维护者裁决。
 
 ## 维护须知

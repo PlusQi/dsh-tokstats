@@ -1,12 +1,10 @@
 {
   "screenshots": [
     "docs/assets/tokprev.png",
-    "docs/assets/tokstats-hero.png",
-    "docs/assets/tokstats-detail.png",
+    "docs/assets/tokstats.png",
     "docs/assets/promptopt.png",
     "docs/assets/tokprev-en.png",
-    "docs/assets/promptopt-en.png",
-    "docs/assets/tokstats.png",
-    "docs/assets/tokstats-en.png"
+    "docs/assets/tokstats-en.png",
+    "docs/assets/promptopt-en.png"
   ]
 }

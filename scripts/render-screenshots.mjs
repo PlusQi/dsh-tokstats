@@ -138,17 +138,16 @@ function summaryFor(windowDays) {
 			{ path: "D:\\projects\\web-app", calls: 5200, in: 2e9, out: 9e5, cr: 1e10, cw: 0 },
 			{ path: "D:\\projects\\docs-site", calls: 2200, in: 8e8, out: 4e5, cr: 3e9, cw: 0 },
 		],
-		// 模型排行给 10 条：真实数据里它常常比桶分布长得多，自适应分列要撑住。
+		// 模型排行 6 条：市场卡片要一张全图装下整块面板，行数直接决定面板高度——
+		// 双列贪心随行数重排，10 条时整图 1536×1856（比例 0.83，卡片里糊）；
+		// 6 条重排后 1536×1677（比例 0.92），八块内容仍在一张图里。长排行场景
+		// 由测试夹具覆盖，不靠效果图。
 		routes: [
 			{ rt: "example/chat-pro", calls: 4034, in: 8.2e8, out: 4.1e6, cr: 5e9, cw: 0 },
 			{ rt: "example/chat-lite", calls: 2595, in: 5.9e8, out: 2.3e6, cr: 3e9, cw: 0 },
 			{ rt: "demo/reasoner-xl", calls: 755, in: 1.3e8, out: 7e5, cr: 6e8, cw: 0 },
 			{ rt: "demo/reasoner-mini", calls: 611, in: 1e8, out: 8.2e5, cr: 4e8, cw: 0 },
 			{ rt: "demo/coder-pro", calls: 525, in: 6.3e7, out: 4.7e5, cr: 2e8, cw: 0 },
-			{ rt: "example/vision-pro", calls: 343, in: 6.3e7, out: 2.5e5, cr: 1e8, cw: 0 },
-			{ rt: "demo/embed-plus", calls: 254, in: 9.1e7, out: 1.8e5, cr: 2e8, cw: 0 },
-			{ rt: "example/chat-fast", calls: 157, in: 1.5e7, out: 1.3e5, cr: 4e7, cw: 0 },
-			{ rt: "demo/omni-preview", calls: 58, in: 6.8e6, out: 4.7e4, cr: 1e7, cw: 0 },
 			{ rt: "", calls: 41, in: 1.6e6, out: 1.3e4, cr: 3e6, cw: 0 },
 		],
 		totals,
@@ -229,20 +228,34 @@ const page = "<!doctype html><html lang=\"" + lang + "\"><head><meta charset=\"u
 	+ "body{" + THEME_LIGHT + "}" + "body[data-ds-dark-theme]{" + THEME_DARK + "}"
 	+ "html,body{margin:0;font-family:\"Microsoft YaHei\",system-ui,sans-serif}"
 	+ "body{background:var(--dsw-alias-bg-base)}"
-	+ "#app{width:" + width + "px;height:" + height + "px;background:var(--dsw-alias-bg-base);overflow:hidden}"
+	+ "#app{width:" + width + "px;background:var(--dsw-alias-bg-base);overflow:hidden}"
 	+ "</style><style>" + css + "</style></head><body"
 	+ (themeName === "dark" ? " data-ds-dark-theme" : "") + "><div id=\"app\">"
-	+ render(tree) + "</div></body></html>";
+	+ render(tree) + "</div><script>var a=document.getElementById(\"app\");"
+	+ "a.setAttribute(\"data-shot-h\",Math.ceil(a.getBoundingClientRect().height))</script></body></html>";
 
 const tmpHtml = join(tmpdir(), "tokstats-shot-" + process.pid + ".html");
 writeFileSync(tmpHtml, page, "utf8");
 mkdirSync(dirname(out), { recursive: true });
 
+// 两遍截图：第一遍 --dump-dom 读页面自己量的内容高度（#app 自适应后的
+// getBoundingClientRect），第二遍按该高度设窗口——固定视口会在内容变矮时
+// 于底部留一圈底色（减夹具行数后空白曾达 200px）。量不到就回退固定高度。
+const probe = spawnSync(chrome, [
+	"--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-sandbox",
+	"--window-size=" + String(width) + "," + String(height),
+	"--virtual-time-budget=3000",
+	"--dump-dom",
+	"file:///" + tmpHtml.replace(/\\/g, "/"),
+], { encoding: "utf8" });
+const measured = /data-shot-h="(\d+)"/.exec(probe.stdout || "");
+const shotHeight = measured ? Math.max(1, Number(measured[1])) : height;
+
 const shot = spawnSync(chrome, [
 	"--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-sandbox",
 	"--force-device-scale-factor=" + String(dpr),
 	// 窗口尺寸与面板一致：多出来的几十像素会在图里留一圈底色边。
-	"--window-size=" + String(width) + "," + String(height),
+	"--window-size=" + String(width) + "," + String(shotHeight),
 	"--screenshot=" + out,
 	"file:///" + tmpHtml.replace(/\\/g, "/"),
 ], { encoding: "utf8" });
@@ -250,7 +263,7 @@ if (!existsSync(out) || (shot.status !== 0 && shot.status !== null)) {
 	console.error(shot.stderr || shot.stdout || "chromium 截图失败");
 	process.exit(1);
 }
-console.log("wrote", out, "(" + width + "x" + height + " @" + dpr + "x, " + lang + ", " + range + ", " + themeName + ")");
+console.log("wrote", out, "(" + width + "x" + shotHeight + " @" + dpr + "x, " + lang + ", " + range + ", " + themeName + ")");
 
 /** 按 Playwright 的默认缓存目录找 chromium（找不到就让调用方用 --chrome 指定）。 */
 function findChrome() {

@@ -60,8 +60,6 @@
     "lib",
     "locale",
     "screenshots.json",
-    "docs/assets/tokstats-hero.png",
-    "docs/assets/tokstats-detail.png",
     "docs/assets/tokstats.png",
     "docs/assets/tokstats-en.png",
     "docs/assets/tokprev.png",
