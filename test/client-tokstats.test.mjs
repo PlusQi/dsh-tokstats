@@ -43,7 +43,7 @@ function setupClient(opts = {}) {
 function panelPropsOf(rpc) {
 	return { t: (key, params) => {
 		const table = {
-			"panel.title": "Token 分析",
+			"panel.title": "Token 用量统计",
 			"state.pending": "统计中…",
 			"range.days7": "近 7 天",
 			"range.month": "本月",
@@ -154,7 +154,7 @@ test("AC-9 / p0-b：panellist 的 id 必须等于 main 的 key（否则 selectPa
 test("注册形态：label 是函数（locale 切换时侧栏重取），order 排在官方面板之后", () => {
 	const { list } = setupClient();
 	assert.equal(typeof list.opts.label, "function", "label 必须是函数：sidebar 用 resolveSlotLabel 调用它");
-	assert.equal(list.opts.label(), "Token 分析");
+	assert.equal(list.opts.label(), "Token 用量统计");
 	assert.equal(typeof list.opts.order, "number");
 	assert.ok(list.opts.order >= 10, "plugins=0 / schedules=10 之后，取 30");
 	assert.equal(list.opts.locale, NS, "locale 声明是 t 席位的来源");

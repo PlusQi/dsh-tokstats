@@ -7,7 +7,7 @@
 | 插件 | 有什么用 | 在哪看到 |
 | --- | --- | --- |
 | **tokprev** | 发送前告诉你这一轮大概要喂多少 token | Composer 底部一行灰色小字 |
-| **tokstats** | 跨会话统计 token 都花在哪儿了 | 侧栏「Token 分析」→ 全局面板 |
+| **tokstats** | 跨会话统计 token 都花在哪儿了 | 侧栏「Token 用量统计」→ 全局面板 |
 | **promptopt** | 把口语草稿整理成结构化提示词 | Composer 工具行右端的星标按钮 |
 
 ## 安装
@@ -27,7 +27,7 @@ npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
 
 ## 装完看这三处
 
-1. 侧栏多了一项 **「Token 分析」**，点进去有四张指标卡；
+1. 侧栏多了一项 **「Token 用量统计」**，点进去有四张指标卡；
 2. Composer 底部多了一行灰色小字，打几个字，「草稿」那个数会跟着变；
 3. 工具行右端多了一个**星标按钮**（模型选择与发送按钮之间），打了草稿后可用。
 
@@ -52,7 +52,7 @@ npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
 
 ![tokstats 面板效果示意](./docs/assets/tokstats.png)
 
-侧栏「Token 分析」进入全局面板：
+侧栏「Token 用量统计」进入全局面板：
 
 | 区块 | 它回答什么 |
 | --- | --- |

@@ -7,7 +7,7 @@ Possibly useful [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek
 | Plugin | What it is for | Where you see it |
 | --- | --- | --- |
 | **tokprev** | Tells you roughly how many tokens the next turn will feed in, before you send | One grey line under the Composer |
-| **tokstats** | Cross-session statistics on where the tokens went | "Token analytics" in the sidebar → a full panel |
+| **tokstats** | Cross-session statistics on where the tokens went | "Token usage stats" in the sidebar → a full panel |
 | **promptopt** | Turns a spoken draft into a structured prompt | Star button at the right end of the composer tool row |
 
 ## Install
@@ -27,7 +27,7 @@ npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
 
 ## Check these three places
 
-1. The sidebar has a **"Token analytics"** item; opening it shows four metric cards;
+1. The sidebar has a **"Token usage stats"** item; opening it shows four metric cards;
 2. The Composer has one extra grey line at the bottom; type a few characters and the "Draft" figure moves;
 3. The tool row has one extra **star button** (between the model select and the send button), enabled once a draft exists.
 
@@ -52,7 +52,7 @@ How many tokens were spent, and who spent them?
 
 ![tokstats panel](./docs/assets/tokstats-en.png)
 
-"Token analytics" in the sidebar opens a full panel:
+"Token usage stats" in the sidebar opens a full panel:
 
 | Block | What it answers |
 | --- | --- |
