@@ -21,7 +21,7 @@ npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
 
 **Restart the host process afterwards** (profile composition only happens at startup), then reload the page. No config file, no API key, no build step.
 
-- Pin a version: `add github:PlusQi/dsh-tokstats#v0.7.1`
+- Pin a version: `add github:PlusQi/dsh-tokstats#v0.8.0`
 - Local development: `add link:D:\path\to\dsh-tokstats`, edit and restart to see changes
 - If your profile is not called `web`, use yours instead
 

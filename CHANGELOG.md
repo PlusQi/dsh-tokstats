@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-25
+
+> **状态**：本段对应 tag `v0.8.0`。此后未发布内容重新挂回 `[Unreleased]` 段。
+
 ### Added
 
 - **tokstats：新增「当日」档位（设为缺省）、四张指标卡跟随档位、两张时间图并排且整体收紧**：原来四张卡被钉死在「当日」而图表按档位走（两套口径并存），两张时间图又各占整行——打开面板第一眼既读不到「今天用了多少」的全貌，也要滚一屏才能把某天的柱子和热力格对上。本次把这三件事一起理顺：
@@ -336,7 +340,8 @@
 - 双语 README（中文默认 + English）及效果示意图。
 - 设计决策记录 SPEC-tokprev.md（本地留存，不随仓库分发）。
 
-[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/PlusQi/dsh-plugins/compare/v0.5.2...v0.6.0

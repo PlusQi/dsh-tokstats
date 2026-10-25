@@ -21,7 +21,7 @@ npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
 
 **装完必须重启宿主进程**（profile 组合只在启动时生效），再刷新页面。没有配置文件、没有 API key、没有构建步骤。
 
-- 固定版本：`add github:PlusQi/dsh-tokstats#v0.7.1`
+- 固定版本：`add github:PlusQi/dsh-tokstats#v0.8.0`
 - 本机开发：`add link:D:\path\to\dsh-tokstats`，改完代码重启即生效
 - profile 不叫 `web` 就换成你自己的
 
