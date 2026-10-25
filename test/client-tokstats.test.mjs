@@ -1835,8 +1835,15 @@ test("样式：热力图折叠格用斜纹 + 主题变量，且不复用柱图�
 	const gridRule = tag.textContent.match(/\.dsh-tokstats-heat\{([^}]*)\}/);
 	assert.ok(gridRule !== null, "网格规则应存在");
 	assert.match(gridRule[1], /grid-auto-flow:column/, "必须按列填充（DOM 顺序是一周七天连排）");
-	assert.match(gridRule[1], /grid-template-rows:repeat\(7,1fr\)/, "固定 7 行（周一在最上）");
-	assert.match(gridRule[1], /grid-template-columns:repeat\(12,1fr\)/, "12 列 = 12 周");
+	assert.match(gridRule[1], /grid-template-rows:repeat\(7,/, "固定 7 行（周一在最上）");
+	assert.match(gridRule[1], /grid-template-columns:repeat\(12,/, "12 列 = 12 周");
+	// **格子必须有尺寸上限**：纯 `1fr` 在整行卡片里会把每格拉到 ~95px，热力图
+	// 变成七行巨大色块并把下面所有卡片挤出首屏（实测全宽 1600×1000 只剩热力图）。
+	// `minmax(0,Npx)` 是双向钳：宽屏封顶、窄屏按可用宽度收缩。
+	assert.match(gridRule[1], /minmax\(0,\d+px\)/, "格子必须有尺寸上限（minmax 双向钳）");
+	assert.ok(!/repeat\(12,1fr\)/.test(gridRule[1]), "不得退回纯 1fr（会把格子拉成巨大色块）");
+	// 封顶后的余量要两侧均分，否则图会挤在左侧。
+	assert.match(gridRule[1], /justify-content:center/, "封顶后图应居中（余量两侧均分）");
 });
 
 // ── 第五批：单日模式（TS-29；AC-10）────────────────────────────────────────
@@ -2113,6 +2120,24 @@ test("TS-29：折叠格不可点、零日不可点，两者 tooltip 各写明原
 	assert.equal(folded.props.disabled, true, "折叠格不可点");
 	assert.match(String(folded.props.title), /已折叠/, "折叠格 tooltip 写明「已折叠」（不可选原因）");
 	assert.ok(!String(folded.props.title).includes("无记录"), "折叠格不得写「无记录」");
+});
+
+test("TS-29：单日模式页脚只显示那一天，不是「窗口下界 – 今天」", async () => {
+	// 目检时发现的真实不一致：单日模式下 `windowStart` 等于所选日，而页脚右端仍取
+	// 「今天」，于是写着「10/20 – 10/25」而面板里全是 10/20 的数——读者会以为
+	// 面板算错了区间。区间两端在单日模式下是同一天，必须换文案。
+	const fixture = makeSingleDayFixture();
+	const { react, main, t } = setupClient({ rpc: fixture.rpc });
+	const single = await enterSingleDay(react, main, t, fixture.target);
+	const foot = nodesOf(single).find((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-footRange(?:\s|$)/.test(n.props.className));
+	assert.ok(foot, "页脚区间节点应存在");
+	const text = textOf(foot);
+	const label = tokstatsLabel(fixture.target);
+	assert.ok(text.includes(label), `页脚应显示所选日 ${label}，实际 ${text}`);
+	assert.ok(text.includes("单日"), `页脚应标明「单日」，实际 ${text}`);
+	// 不得出现区间形态（– 连接两个不同日期）。
+	assert.ok(!/–/.test(text), `单日页脚不得写成区间，实际 ${text}`);
 });
 
 test("TS-29：单日模式下工作区过滤器与 day 叠加（两个过滤器同时生效）", async () => {
