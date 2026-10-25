@@ -342,7 +342,11 @@ test("桶行：计数与四桶明细分两行（条形图长度不被长数值�
 
 test("AC-9：周趋势渲染为条列表（周起点 + 次数 + 输入/输出），本周标「进行中」", async () => {
 	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary({ weekly: twoWeeks() }) }));
+	// `generatedAt` 必须跟随今天：`twoWeeks()` 的「本周」按真实今天生成，而
+	// 「进行中」按 generatedAt 所在的自然周判定。夹具默认把 generatedAt 钉死在
+	// 一个过去日期，跨过那一周之后两边对不上，标签会静默丢掉「进行中」
+	// （2026-10-26 实测：钉死 10-20 的夹具跑出 '10/26' 而非 '10/26进行中'）。
+	rpc.respond(() => ({ ok: true, value: makeSummary({ weekly: twoWeeks(), generatedAt: Date.now() }) }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
 	assert.ok(textOf(tree).includes("趋势（按周）"), "趋势分区标题");
@@ -1945,9 +1949,16 @@ test("AC-6：热力图渲染 12 列 × 7 行，周一在最上（第一行第一
 	assert.ok(grid, "热力图网格容器应存在（role=grid）");
 	assert.equal(grid.props.role, "grid", "整图 role=grid（TS-28 可访问性）");
 	const cells = heatRealCellsOf(tree);
-	// 84 格 = 12 列 × 7 行。**格子数必须恰为 84**：多一格说明窗口没锁死 84 天，
-	// 少一格说明末列被错误裁掉（今天所在的周还没过完，但过去的格子都在）。
-	assert.equal(cells.length, 84, `应恰有 84 个日期格，实际 ${cells.length}`);
+	// 网格总槽位恒为 84（12 列 × 7 行，窗口锁死 12 个自然周）；但**真实格数
+	// 随今天在周内的位置变**：末列就是「今天所在的周」，今天之后的天留空占位。
+	// 周日跑末列刚好满（84），周一跑本周只过了 1 天（78）——写死 84 会让这条
+	// 用例在周一到周六静默失败（2026-10-26 周一实测 78）。判据与下面「末列
+	// 空占位」那条同口径：占位 = 6 − 今天周内位置，真实格 = 78 + 今天周内位置。
+	const todayDow = (new Date().getDay() + 6) % 7; // 0 = 周一
+	const allSlots = heatCellsOf(tree);
+	assert.equal(allSlots.length, 84, `网格槽位应恒为 84（12 列 × 7 行），实际 ${allSlots.length}`);
+	assert.equal(cells.length, 78 + todayDow,
+		`真实格应 = 78 + 今天周内位置（${todayDow}）= ${78 + todayDow}，实际 ${cells.length}`);
 	// 第一格必须是**周一**：DOM 顺序按「一周七天连排」，配合 grid-auto-flow:column
 	// 才是「列 = 自然周」。若第一格是别的星期几，说明列的起点没按自然周对齐。
 	const firstDay = cells[0].props.title;
