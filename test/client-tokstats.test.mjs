@@ -108,7 +108,10 @@ function makeSummary(overrides = {}) {
 		],
 		totals: { calls: 3, in: 201000, cr: 3000, cw: 0, out: 250 },
 		windowStart: "2026-07-23",
-		generatedAt: 1787000000000,
+		// 生成时刻定在**本地** 2026-10-20 中午：它是「这一帧的口径基准日」——KPI 四卡
+		// 取它的当日行（TS-30），日柱图末列也钳到它的当日。用本地时间构造而不是写死
+		// 时间戳：写死 UTC 毫秒时，在东八区以西的机器上会落到 10/19，断言随之漂移。
+		generatedAt: new Date(2026, 9, 20, 12, 0, 0).getTime(),
 		windowDays: 90,
 		// 可审计性载荷（第一批在 host 侧上线，第二批开始被界面消费）。缺省造
 		// 「三个会话都能读、无折叠历史」的常态；需要反例的用例显式 override。
@@ -130,8 +133,48 @@ async function renderPanel(react, main, props) {
 	return renderDeep(react, main.comp(props));
 }
 
-// ── 模块 / 注册 ────────────────────────────────────────────────────────────
+/** 自然周起点（周一）的日键——与 host 的 `tokstatsWeekStartOf` 同口径。 */
+function weekStartOf(day) {
+	const d = new Date(day + "T00:00:00Z");
+	d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+	return d.toISOString().slice(0, 10);
+}
 
+/** 日键 → `M/D`（与 tokstatsDayLabel 同口径，供断言用）。 */
+function mmdd(day) {
+	const [, m, d] = day.split("-");
+	return Number(m) + "/" + Number(d);
+}
+
+/** 造两周的 weekly：上一自然周 + 本周（本周那条会被标「进行中」并置灰）。 */
+function twoWeeks({ prevCalls = 1, nowCalls = 3 } = {}) {
+	return [
+		{ weekStart: weekStartOf(dayOffset(-10)), calls: prevCalls, in: 1000, cr: 3000, cw: 0, out: 100 },
+		{ weekStart: weekStartOf(dayOffset(0)), calls: nowCalls, in: 201000, cr: 3000, cw: 0, out: 250 },
+	];
+}
+
+// ── 面板节点选择器（类名按「词」匹配，不按整串）──────────────────────────
+//
+// 类名会是「基础类 + 轨道类」的组合（如 `dsh-tokstats-axis dsh-tokstats-axisTrack`），
+// 用 `=== "dsh-tokstats-axis"` 找节点在加了组合类之后会静默返回 undefined，
+// 断言随之变成「空串相等」那种假绿。这里统一按词匹配。
+function hasClass(node, className) {
+	return typeof node.props?.className === "string"
+		&& new RegExp("(?:^|\\s)" + className + "(?:\\s|$)").test(node.props.className);
+}
+
+/** 横轴容器（日期刻度）。 */
+function axisNodeOf(tree) {
+	return nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-axis"));
+}
+
+/** 横轴刻度槽（每列一个，含空槽）。 */
+function axisSlotsOf(tree) {
+	return nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-axisSlot"));
+}
+
+// ── 模块 / 注册 ────────────────────────────────────────────────────────────
 test("client 产物：导出 { inject: [slots, locale], apply }；tokstats 改成 panellist + main 两处注册", () => {
 	const { exportsObj, registrations } = setupClient();
 	// locale 是硬依赖（与官方 UI 包同构）：宿主无 locale 服务时整包不加载。
@@ -225,7 +268,7 @@ test("面板打开时发一次 RPC（channel / endpoint / 缺省窗口）", asyn
 	assert.ok(summary, "应拉主报表");
 	assert.ok(counters, "应拉 promptopt 计数器");
 	assert.equal(summary.channel, CHANNEL);
-	assert.equal(summary.payload.windowDays, 7, "缺省档位是近 7 天");
+	assert.equal(summary.payload.windowDays, 1, "缺省档位是「当日」（windowDays = 1 正好是今天）");
 	assert.equal(summary.payload.workspace, undefined, "未选工作区时不传该字段");
 	assert.ok(tree !== null);
 });
@@ -297,23 +340,53 @@ test("桶行：计数与四桶明细分两行（条形图长度不被长数值�
 	assert.equal(fill.props.style.width, "33.3%");
 });
 
-test("AC-9：趋势分区渲染周行（四列表：周起点 / 次数 / 输入 / 输出）", async () => {
+test("AC-9：周趋势渲染为条列表（周起点 + 次数 + 输入/输出），本周标「进行中」", async () => {
 	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary() }));
+	rpc.respond(() => ({ ok: true, value: makeSummary({ weekly: twoWeeks() }) }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
-	const text = textOf(tree);
-	assert.ok(text.includes("趋势（按周）"), "趋势分区标题");
-	assert.ok(text.includes("10/19"), "周起点按 M/D 显示");
+	assert.ok(textOf(tree).includes("趋势（按周）"), "趋势分区标题");
+
+	const card = nodesOf(tree).find((n) => typeof n.props.className === "string"
+		&& n.props.className === "dsh-tokstats-card" && textOf(n).startsWith("趋势（按周）"));
+	assert.ok(card !== undefined, "周趋势卡应存在");
+	const meters = nodesOf(card).filter((n) => hasClass(n, "dsh-tokstats-meter"));
+	assert.equal(meters.length, 2, "两周 → 两行");
+	const partOf = (meter, cls) => textOf(nodesOf(meter).find((n) => n.props.className === cls));
+
+	const nowWeek = weekStartOf(dayOffset(0));
+	assert.equal(textOf(nodesOf(meters[1]).find((n) => n.props.className === "dsh-tokstats-meterLabel")),
+		mmdd(nowWeek) + "进行中", "本周标签带「进行中」");
+	assert.equal(partOf(meters[1], "dsh-tokstats-meterValue"), "3 次", "数值列只放计数");
 	// 周行的「输入」是 in+cr+cw = 204K，不是未缓存的 201K（TS-17）。
-	// 断言必须落在周行节点上：整树 includes 会被 KPI 的 hint「未缓存 201K」误命中，
-	// 那样即使周行退回未缓存口径也照样绿（正是本次要防的回归）。
-	const weekRow = rowNodesOf(tree).find((n) => textOf(n).startsWith("10/19"));
-	assert.ok(weekRow !== undefined, "周行应存在");
-	const cells = nodesOf(weekRow)
-		.filter((n) => n.props.className === "dsh-tokstats-cellNum")
-		.map((n) => textOf(n));
-	assert.deepEqual(cells, ["3", "204K", "250"], "次数 / 输入（计费口径）/ 输出");
+	assert.equal(partOf(meters[1], "dsh-tokstats-meterDetail"), "输入 204K · 输出 250",
+		"副行给出计费口径的输入与输出");
+	// 条长按**最大周**归一（这是趋势，不是构成）：本周 3/3 = 100%，上周 1/3 ≈ 33%。
+	const fillOf = (meter) => nodesOf(meter).find((n) => n.props.className === "dsh-tokstats-meterFill");
+	assert.equal(fillOf(meters[1]).props.style.width, "100.0%");
+	assert.equal(fillOf(meters[0]).props.style.width, "33.3%");
+	// 本周置灰 + 标记：未过完的一周和完整周并排比会读成「用量掉了」。
+	assert.ok(hasClass(meters[1], "dsh-tokstats-dim"), "本周整行置灰");
+	assert.ok(!hasClass(meters[0], "dsh-tokstats-dim"), "完整周不置灰");
+	assert.match(String(meters[1].props.title), /本周还没过完/, "本周 tooltip 说明数字仍在增长");
+});
+
+test("AC-9：周趋势不足 2 行时整卡不渲染（那一行恒等于四卡合计，复述主值）", async () => {
+	// 当日档、本月月初、单日模式都是这个形态：判据是**行数**而不是档位天数——
+	// 只判 `days === 1` 会漏掉「本月」1 号到 7 号那几天。
+	const rpc = makeRpcStub();
+	rpc.respond(() => ({
+		ok: true,
+		value: makeSummary({ weekly: [{ weekStart: weekStartOf(dayOffset(0)), calls: 3, in: 201000, cr: 3000, cw: 0, out: 250 }] }),
+	}));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	assert.ok(!textOf(tree).includes("趋势（按周）"), "只有一周时不渲染周趋势卡");
+	// 剩下两张尾部卡（工作区 / 提示词整理）自动凑成一行，不留半个空列。
+	for (const pairGrid of nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-pairGrid"))) {
+		assert.equal(nodesOf(pairGrid).filter((n) => hasClass(n, "dsh-tokstats-card")).length, 2,
+			"每个双列行必须恰好两张卡");
+	}
 });
 
 test("AC-9：工作区切换器出现且含「全部工作区」与各项", async () => {
@@ -328,24 +401,24 @@ test("AC-9：工作区切换器出现且含「全部工作区」与各项", asyn
 	assert.ok(textOf(select).includes("全部工作区"));
 });
 
-	test("时间档位：四个按钮按「近 7 天 / 本月 / 近 30 天 / 全部」排列，缺省选中近 7 天", async () => {
+	test("时间档位：五个按钮按「当日 / 近 7 天 / 本月 / 近 30 天 / 全部」排列，缺省选中当日", async () => {
 	const rpc = makeRpcStub();
 	rpc.respond(() => ({ ok: true, value: makeSummary() }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
 	const buttons = nodesOf(tree).filter((n) => n.type === "button"
 		&& typeof n.props.className === "string" && n.props.className.includes("dsh-tokstats-switch"));
-	assert.equal(buttons.length, 4, "四个时间档位");
-	assert.deepEqual(buttons.map((b) => textOf(b)), ["近 7 天", "本月", "近 30 天", "全部"]);
+	assert.equal(buttons.length, 5, "五个时间档位");
+	assert.deepEqual(buttons.map((b) => textOf(b)), ["当日", "近 7 天", "本月", "近 30 天", "全部"]);
 	// 按钮 key 必须是档位 id，不能是折算后的天数：每月 7 号「本月」与「近 7 天」
 	// 的 windowDays 都是 7，用天数当 key 会让两个按钮 key 撞车（React 重复 key 警告
 	// + 高亮错配）。断言写成 id 白名单而不是「四者不同」——后者在每月 22 号这类
 	// 「折算值恰好不撞车」的日子对回归仍有假绿，必须直接钉死寻址形态。
 	const keys = buttons.map((b) => b.props.key);
-	assert.deepEqual(keys, ["days7", "month", "days30", "all"], "档位按 id 寻址（与词典键 range.<id> 同源）");
+	assert.deepEqual(keys, ["today", "days7", "month", "days30", "all"], "档位按 id 寻址（与词典键 range.<id> 同源）");
 	const on = buttons.filter((b) => b.props.className.includes("dsh-tokstats-switchOn"));
 	assert.equal(on.length, 1, "同时只能有一个档位高亮");
-	assert.equal(textOf(on[0]), "近 7 天", "缺省选中近 7 天");
+	assert.equal(textOf(on[0]), "当日", "缺省选中「当日」（打开先回答「今天用了多少」）");
 });
 
 test("切换窗口：每个档位各发一次请求（近 7 天 / 本月 / 近 30 天 / 全部=0）", async () => {
@@ -356,10 +429,10 @@ test("切换窗口：每个档位各发一次请求（近 7 天 / 本月 / 近 3
 	let tree = main.comp(props);
 	react.runEffects();
 	await new Promise((r) => setImmediate(r));
-	// 首轮：主报表 + 计数器各一次（缺省近 7 天）
+	// 首轮：主报表 + 计数器各一次（缺省「当日」= windowDays 1）
 	const first = rpc.calls.filter((c) => c.endpoint === "summary");
 	assert.equal(first.length, 1);
-	assert.equal(first[0].payload.windowDays, 7, "缺省发 7 天");
+	assert.equal(first[0].payload.windowDays, 1, "缺省发 1 天（当日）");
 
 	// 「本月」折算成「今天是几号」，全部档发 0；两者与已有请求的 windowDays 相同时
 	// （例如今天是 7 号 / 30 号）effect 不会重跑——这是按值去重的正常结果，断言
@@ -369,8 +442,10 @@ test("切换窗口：每个档位各发一次请求（近 7 天 / 本月 / 近 3
 		{ label: "全部", expect: 0 },
 		{ label: "近 30 天", expect: 30 },
 		{ label: "本月", expect: monthDays },
+		{ label: "近 7 天", expect: 7 },
+		{ label: "当日", expect: 1 },
 	];
-	let previous = 7;
+	let previous = 1;
 	for (const step of sequence) {
 		react.reset();
 		const buttons = nodesOf(tree).filter((n) => n.type === "button"
@@ -431,23 +506,180 @@ test("空数据：buckets 全零时显示「暂无数据」", async () => {
 
 // ── v0.7.0 统计面板：KPI / 每日柱 / 工作区排行 / 刷新 ────────────────────────
 
-test("KPI 四卡：调用次数 / 输入 / 输出 / 缓存命中率，数值来自 totals", async () => {
+/**
+ * 按请求的 `windowDays` 返回不同合计的汇总桩：用来验证「四卡跟随档位」。
+ * - `windowDays === 1`（当日）：只有今天那一行 → calls 40 / 未缓存 1000 / 缓存读 3000 / 输出 100
+ * - 更长的窗口：加上昨天（calls 60 / 未缓存 2000 / 缓存读 2000 / 输出 300）
+ *
+ * 两档的四个数**全部不同**（40 vs 100、4.0K vs 8.0K、100 vs 400、75% vs 63%），
+ * 断言才不会在「四卡没跟着档位变」的实现下也绿。
+ */
+function makeRangeAwareSummary(call) {
+	const days = call?.payload?.windowDays ?? 1;
+	const single = days === 1;
+	const todayRow = { day: dayOffset(0), calls: 40, in: 1000, cr: 3000, cw: 0, out: 100 };
+	const yesterdayRow = { day: dayOffset(-1), calls: 60, in: 2000, cr: 2000, cw: 0, out: 300 };
+	const daily = single ? [todayRow] : [yesterdayRow, todayRow];
+	const totals = daily.reduce((sum, row) => ({
+		calls: sum.calls + row.calls,
+		in: sum.in + row.in,
+		cr: sum.cr + row.cr,
+		cw: 0,
+		out: sum.out + row.out,
+	}), { calls: 0, in: 0, cr: 0, cw: 0, out: 0 });
+	return makeSummary({
+		daily,
+		weekly: single ? [] : [{
+			weekStart: dayOffset(-1), calls: totals.calls, in: totals.in, cr: totals.cr, cw: 0, out: totals.out,
+		}],
+		workspaces: [],
+		routes: [],
+		totals,
+		windowStart: single ? dayOffset(0) : dayOffset(-(days - 1)),
+		windowDays: days,
+		generatedAt: Date.now(),
+		// 固定 84 天序列（这里只造最近 7 天）：柱图固定按它画「最近 7 天」，
+		// 「调用次数」副值的份额分母也取它的合计（40 / 150 ≈ 27%）。
+		heatDaily: [-6, -5, -4, -3, -2].map((offset) => ({
+			day: dayOffset(offset), calls: 10, in: 100, cr: 900, cw: 0, out: 20,
+		})).concat([yesterdayRow, todayRow]),
+	});
+}
+
+test("TS-30：缺省「当日」档——四卡显示今天的数；切到「近 7 天」后同步变成区间合计", async () => {
 	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary() }));
+	rpc.respond((call) => ({ ok: true, value: makeRangeAwareSummary(call) }));
+	const { react, main, t } = setupClient({ rpc });
+	const props = { t };
+	let tree = await renderPanel(react, main, props);
+
+	const kpisOf = (root) => nodesOf(root)
+		.filter((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-kpi")
+		.map((n) => textOf(n));
+	const today = kpisOf(tree);
+	assert.equal(today.length, 4, "四张指标卡");
+	assert.ok(today[0].startsWith("调用次数40"), `缺省当日应显示今天的 40，实际 ${today[0]}`);
+	assert.ok(today[1].startsWith("输入4.0K"), `今日输入 = billed = 4.0K，实际 ${today[1]}`);
+	assert.ok(today[2].startsWith("输出100"), `今日输出 = 100，实际 ${today[2]}`);
+	assert.ok(today[3].startsWith("缓存命中率75%"), `今日命中率 = 75%，实际 ${today[3]}`);
+	// 当日档只有一天，「日均」会等于主值本身（复述主值，TS-17），改给占 84 天份额。
+	assert.match(today[0], /占 84 天 27%/, "当日档的副值是占 84 天份额（40 / 150）");
+	// 页脚也不能写成「10/25 – 10/25」：单日形态才不让人以为算错了区间。
+	const foot = textOf(tree).slice(-40);
+	assert.ok(/单日/.test(textOf(tree)), "当日档页脚用单日形态");
+	assert.ok(!foot.includes("–"), `页脚不得出现区间连接符，实际 ${foot}`);
+
+	// 切到「近 7 天」：请求重发，四卡同步换成区间合计（不是「只有当日的数」）。
+	//
+	// 顺序不能省：effect 是**渲染期**登记的，点完直接 `runEffects()` 跑的是上一轮
+	// （旧 rangeDays=1）的闭包——请求都不会变，四卡自然不动。必须先重渲染一次。
+	react.reset();
+	const switches = nodesOf(tree).filter((n) => n.type === "button"
+		&& typeof n.props.className === "string" && n.props.className.includes("dsh-tokstats-switch"));
+	switches.find((b) => textOf(b) === "近 7 天").props.onClick();
+	react.reset();
+	main.comp(props);
+	react.runEffects();
+	for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r));
+	react.reset();
+	tree = renderDeep(react, main.comp(props));
+
+	const week = kpisOf(tree);
+	assert.ok(week[0].startsWith("调用次数100"), `切档后应为区间合计 100，实际 ${week[0]}`);
+	assert.ok(week[1].startsWith("输入8.0K"), `区间输入 = 8.0K，实际 ${week[1]}`);
+	assert.ok(week[2].startsWith("输出400"), `区间输出 = 400，实际 ${week[2]}`);
+	assert.ok(week[3].startsWith("缓存命中率63%"), `区间命中率 = 5000/8000 = 63%，实际 ${week[3]}`);
+	// 多天窗口的副值是日均：100 / 7 = 14.3。
+	assert.match(week[0], /日均 14\.3 次/, `近 7 天档的副值是日均，实际 ${week[0]}`);
+});
+
+test("TS-30：当日档隐藏周趋势卡（周合计恒等于 totals，复述主值），桶分布独占整行", async () => {
+	const rpc = makeRpcStub();
+	rpc.respond((call) => ({ ok: true, value: makeRangeAwareSummary(call) }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
-	const kpis = nodesOf(tree).filter((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-kpi");
-	assert.equal(kpis.length, 4, "四张指标卡");
-	const values = kpis.map((n) => textOf(n));
-	// totals: calls 3 / in 201000 / cr 3000 / cw 0 / out 250 → 输入 204K，命中率 1%
-	assert.ok(values[0].includes("3"), "调用次数");
-	assert.ok(values[1].includes("204K"), "输入 = in + cr + cw");
-	assert.ok(values[2].includes("250"), "输出合计");
-	assert.ok(values[3].includes("1%"), "命中率 = cr / (in+cr+cw)");
-	// 面板不再有两个「输入」：卡名是「输入」，hint 拆未缓存 / 缓存读（TS-17）。
-	assert.ok(values[1].startsWith("输入204K"), `卡名应为「输入」，实际 ${values[1]}`);
-	assert.ok(!values[1].includes("计费输入"), "不再用「计费输入」这个名字");
-	assert.match(values[1], /未缓存 201K · 缓存读 3\.0K/, "hint 拆出未缓存与缓存读");
+	assert.ok(!textOf(tree).includes("趋势（按周）"), "当日档不显示周趋势（它恒等于四卡合计）");
+	// 只有一张卡的那一行不能套双列栅格：2fr 1fr 会空出右边 1/3。
+	const rowGrids = nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-rowGrid"));
+	assert.equal(rowGrids.length, 0, "没有两卡同行的行时不得套 rowGrid（会留半个空列）");
+});
+
+test("TS-33：日柱图跟随档位、但窗口不少于 7 天（当日档仍画 7 根柱）", async () => {
+	const { react, main, t } = (() => {
+		const rpc = makeRpcStub();
+		// 按请求的窗口造逐日数据：当日档 `daily` 只有 1 行（所以图要借 heatDaily），
+		// 其余档位给各自天数的序列；「全部」档给 60 天（用于验证 30 列合并）。
+		const rowsFor = (windowDays) => {
+			const n = windowDays > 0 ? windowDays : 60;
+			const rows = [];
+			for (let i = n - 1; i >= 0; i -= 1) {
+				rows.push({ day: dayOffset(-i), calls: 10 + (i % 5), in: 100, cr: 0, cw: 0, out: 1 });
+			}
+			return rows;
+		};
+		rpc.respond((call) => {
+			const windowDays = call.payload?.windowDays ?? 1;
+			const daily = rowsFor(windowDays);
+			const totals = daily.reduce((sum, row) => ({
+				calls: sum.calls + row.calls, in: sum.in + row.in, cr: 0, cw: 0, out: sum.out + row.out,
+			}), { calls: 0, in: 0, cr: 0, cw: 0, out: 0 });
+			return {
+				ok: true,
+				value: makeSummary({
+					daily,
+					weekly: twoWeeks(),
+					// 当日档的图从这份固定 84 天序列里切最近 7 天。
+					heatDaily: [6, 5, 4, 3, 2, 1, 0].map((k) => ({
+						day: dayOffset(-k), calls: 10 + k, in: 100, cr: 0, cw: 0, out: 1,
+					})),
+					totals,
+					windowDays,
+					windowStart: windowDays > 0 ? dayOffset(-(windowDays - 1)) : dayOffset(-59),
+				}),
+			};
+		});
+		return setupClient({ rpc });
+	})();
+	const props = { t };
+	let tree = await renderPanel(react, main, props);
+
+	const cardNoteOf = (root) => {
+		const card = nodesOf(root).find((n) => typeof n.props.className === "string"
+			&& n.props.className === "dsh-tokstats-card" && textOf(n).startsWith("每日调用量"));
+		const extra = nodesOf(card).find((n) => n.props.className === "dsh-tokstats-cardExtra");
+		return textOf(extra);
+	};
+	const switchTo = async (label) => {
+		react.reset();
+		const switches = nodesOf(tree).filter((n) => n.type === "button"
+			&& typeof n.props.className === "string" && n.props.className.includes("dsh-tokstats-switch"));
+		switches.find((b) => textOf(b) === label).props.onClick();
+		react.reset();
+		main.comp(props);
+		react.runEffects();
+		for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r));
+		react.reset();
+		tree = renderDeep(react, main.comp(props));
+	};
+
+	// ① 缺省「当日」：窗口只有 1 天，图按下限画最近 7 天，卡头写明「近 7 天」。
+	assert.equal(barNodesOf(tree).length, 7, "当日档按 7 天下限画 7 根柱");
+	assert.ok(cardNoteOf(tree).includes("近 7 天"), `卡头应标注实际跨度，实际 ${cardNoteOf(tree)}`);
+	assert.equal(nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-barPeak")).length, 1,
+		"7 列时峰值标签仍在");
+
+	// ② 切到「近 30 天」：图跟着档位走，30 列逐日；列密时不标峰值（卡头「峰值 …」兜底）。
+	await switchTo("近 30 天");
+	assert.equal(barNodesOf(tree).length, 30, "近 30 天档画 30 列");
+	assert.ok(cardNoteOf(tree).includes("近 30 天"), `卡头应写近 30 天，实际 ${cardNoteOf(tree)}`);
+	assert.equal(nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-barPeak")).length, 0,
+		"30 列时不在柱顶标数值（会被相邻柱压成半个数字）");
+	assert.match(textOf(tree), /峰值/, "峰值数值仍在卡片头部");
+
+	// ③ 切到「全部」：60 天按整日合并到 30 列，卡头写「全部」。
+	await switchTo("全部");
+	assert.equal(barNodesOf(tree).length, 30, "60 天按 2 天合并 → 30 列（列数上限）");
+	assert.ok(cardNoteOf(tree).includes("全部"), `卡头应写「全部」，实际 ${cardNoteOf(tree)}`);
 });
 
 test("面板所有「输入」显示值统一为 in+cr+cw（KPI / 周行 / 日柱 tooltip / 工作区 / 模型排行）", async () => {
@@ -455,19 +687,21 @@ test("面板所有「输入」显示值统一为 in+cr+cw（KPI / 周行 / 日�
 	// 输入」都会落到不同的数字上（201K vs 204K、1.0K vs 4.0K），因此能真正区分口径。
 	// 只断言某一处不够：本次缺陷正是「同一面板 8 处里 6 处漏了 cr/cw」。
 	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary() }));
+	rpc.respond(() => ({ ok: true, value: makeSummary({ weekly: twoWeeks() }) }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
 
-	// 1) KPI 卡值 = totals 的 billed
+	// 1) KPI 卡值 = totals 的 billed（四卡跟随档位，窗口合计仍是 in+cr+cw 口径）
 	const kpis = nodesOf(tree).filter((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-kpi");
 	assert.match(textOf(kpis[1]), /^输入204K/, "KPI 值 = billed(totals) = 204K");
 
-	// 2) 周行 = weekly 的 billed（201000 + 3000）
-	const weekRow = rowNodesOf(tree).find((n) => textOf(n).startsWith("10/19"));
-	const weekCells = nodesOf(weekRow)
-		.filter((n) => n.props.className === "dsh-tokstats-cellNum").map((n) => textOf(n));
-	assert.deepEqual(weekCells, ["3", "204K", "250"], "周行「输入」= billed(weekly)");
+	// 2) 周行 = weekly 的 billed（201000 + 3000）；周趋势卡是条列表，明细在副行。
+	const weekCard = nodesOf(tree).find((n) => typeof n.props.className === "string"
+		&& n.props.className === "dsh-tokstats-card" && textOf(n).startsWith("趋势（按周）"));
+	assert.ok(weekCard !== undefined, "周趋势卡应存在");
+	const weekDetail = nodesOf(weekCard)
+		.filter((n) => n.props.className === "dsh-tokstats-meterDetail").map((n) => textOf(n));
+	assert.deepEqual(weekDetail, ["输入 4.0K · 输出 100", "输入 204K · 输出 250"], "周行「输入」= billed(weekly)");
 
 	// 3) 日柱 tooltip = daily 各日的 billed（列聚合必须带 cr/cw）
 	const barTitles = nodesOf(tree)
@@ -509,15 +743,6 @@ test("面板所有「输入」显示值统一为 in+cr+cw（KPI / 周行 / 日�
 	assert.ok(!/输入 1\.0K/.test(text), "不得出现未缓存口径的「输入 1.0K」（缺陷形态）");
 });
 
-test("KPI：窗口天数参与日均换算（1 天窗口 → 3/1 = 3.0）", async () => {
-	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary({ windowDays: 1 }) }));
-	const { react, main, t } = setupClient({ rpc });
-	const tree = await renderPanel(react, main, { t });
-	const kpis = nodesOf(tree).filter((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-kpi");
-	assert.ok(textOf(kpis[0]).includes("3.0"), "1 天窗口下日均 = 3.0");
-});
-
 test("每日柱状图：按窗口跨度压缩成至多 60 列，柱高按峰值归一", async () => {
 	const rpc = makeRpcStub();
 	rpc.respond(() => ({ ok: true, value: makeSummary() }));
@@ -551,18 +776,147 @@ test("每日柱：起点不早于首个数据日（避免整段空窗口）", as
 	rpc.respond(() => ({ ok: true, value: makeSummary() }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
-	const axis = nodesOf(tree).find((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-axis");
-	const axisText = textOf(axis);
+	const axisText = textOf(axisNodeOf(tree));
 	assert.ok(axisText.startsWith("10/19"), `左轴应为首个数据日 10/19，实际 ${axisText}`);
+});
+
+test("TS-23：横轴刻度与柱位同轨——每列一个刻度槽，标签只落在首/中/末列", async () => {
+	// 「日期标签与量柱对齐」的实现点：轴容器与柱容器共用 `.dsh-tokstats-track`，
+	// 槽与柱共用 `.dsh-tokstats-trackItem`。这条用例钉住**结构**（列数一一对应），
+	// 样式约束由「轨道规则唯一」那条用例钉住——两者合起来才排除「标签偏到一侧」。
+	const rpc = makeRpcStub();
+	rpc.respond(() => ({ ok: true, value: makeSummary() }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const bars = barNodesOf(tree);
+	const slots = axisSlotsOf(tree);
+	assert.ok(bars.length > 0, "应有柱位");
+	assert.equal(slots.length, bars.length, "刻度槽数量必须等于柱位数量（同列数才可能同宽同位）");
+	// 夹具是 2 列（10/19、10/20）→ 两列都写字，没有空槽。
+	assert.deepEqual(slots.map((n) => textOf(n)), ["10/19", "10/20"]);
+	assert.equal(hasClass(slots[0], "dsh-tokstats-trackItem"), true, "刻度槽必须挂 trackItem（与柱同一套宽度约束）");
+	assert.equal(hasClass(bars[0], "dsh-tokstats-trackItem"), true, "柱位必须挂 trackItem");
+	assert.equal(hasClass(axisNodeOf(tree), "dsh-tokstats-track"), true, "轴容器必须挂 track（与柱容器同一套 flex 约束）");
+	// 首槽左对齐、末槽右对齐：居中的话首末标签各有一半溢出到图外。
+	assert.equal(hasClass(slots[0], "dsh-tokstats-axisSlotFirst"), true, "首槽靠左");
+	assert.equal(hasClass(slots[slots.length - 1], "dsh-tokstats-axisSlotLast"), true, "末槽靠右");
+
+	// 列多时只写三处（列宽只有 9–13px，每列都写会糊成一片）。
+	const manyDaily = [];
+	for (let i = 0; i < 30; i += 1) {
+		const d = new Date(Date.UTC(2026, 6, 23) + i * 86400000).toISOString().slice(0, 10);
+		manyDaily.push({ day: d, calls: i + 1, in: 100, cr: 0, cw: 0, out: 1 });
+	}
+	const rpc30 = makeRpcStub();
+	rpc30.respond(() => ({ ok: true, value: makeSummary({ daily: manyDaily, windowStart: "2026-07-23" }) }));
+	const setup30 = setupClient({ rpc: rpc30 });
+	const tree30 = await renderPanel(setup30.react, setup30.main, { t: setup30.t });
+	const slots30 = axisSlotsOf(tree30);
+	const labelled = slots30.filter((n) => textOf(n) !== "");
+	assert.equal(labelled.length, 3, `30 列只标三处，实际 ${labelled.length}`);
+	assert.equal(slots30.length, barNodesOf(tree30).length, "30 列同样一一对应");
 });
 
 test("每日柱：无 daily 字段时整卡不渲染（兼容旧 host 返回值）", async () => {
 	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary({ daily: undefined }) }));
+	// weekly 给两周：周趋势卡在不足 2 行时会隐藏（复述主值），而这条用例要验证的
+	// 是「没有 daily 不影响别的卡」，别让夹具把周趋势也一起隐藏掉。
+	rpc.respond(() => ({ ok: true, value: makeSummary({ daily: undefined, weekly: twoWeeks() }) }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
 	assert.ok(!textOf(tree).includes("每日调用量"), "无日序列时不显示空图");
 	assert.ok(textOf(tree).includes("趋势（按周）"), "其余卡片照常");
+});
+
+test("AC-6：热力图与日柱图并排同一行（pairGrid 等宽两列），另一张缺席时不占半行", async () => {
+	const rpc = makeRpcStub();
+	// 热力图要真实渲染（缺 heatDaily 时整卡不渲染），这里给两天有量的 84 天序列。
+	const heatDaily = makeHeatDaily([{ offset: -3, calls: 5 }, { offset: -2, calls: 12 }]);
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+
+	const pair = nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-pairGrid"));
+	assert.ok(pair !== undefined, "两张时间图必须落在同一个 pairGrid 里（同一行）");
+	const cardTitles = nodesOf(pair)
+		.filter((n) => hasClass(n, "dsh-tokstats-cardTitle"))
+		.map((n) => textOf(n));
+	assert.deepEqual(cardTitles, ["每日调用量", "近 12 周用量"], "日柱图在左、热力图在右（主图优先），且只有这两张");
+	// 两张卡各自出现一次：并排不能靠「渲染两遍」实现。
+	const allTitles = nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-cardTitle")).map((n) => textOf(n));
+	assert.equal(allTitles.filter((v) => v === "近 12 周用量").length, 1, "热力图卡只渲染一次");
+	assert.equal(allTitles.filter((v) => v === "每日调用量").length, 1, "日柱图卡只渲染一次");
+
+	// 样式：等宽两列 + 等高；窄窗折成单列。等宽是「两张卡都放得下」的前提，
+	// `stretch` 让较矮的柱图卡与热力图卡同高，两张卡的边框才能对齐。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	const pairRule = css.match(/\.dsh-tokstats-pairGrid\{([^}]*)\}/);
+	assert.ok(pairRule !== null, "并排栅格规则应存在");
+	assert.match(pairRule[1], /grid-template-columns:1fr 1fr/, "等宽两列");
+	assert.match(pairRule[1], /align-items:stretch/, "两卡等高");
+	const breakpoint = css.match(/@media \(max-width:820px\)\{\.dsh-tokstats-pairGrid\{([^}]*)\}\}/);
+	assert.ok(breakpoint !== null, "窄窗需要折成单列的断点");
+	assert.match(breakpoint[1], /grid-template-columns:1fr;?/, "窄窗折成单列");
+
+	// 结构性判据：**每个双列行必须恰好两张卡**。只剩一张时（旧 host 无 heatDaily、
+	// 单日模式隐藏柱图、当日档隐藏周趋势）`pairRow` 会改成单列独占整行——套上双列
+	// 就会空出半个容器，而这条断言对「哪一行缺了」不敏感，只管有没有空位。
+	for (const pairGrid of nodesOf(tree).filter((n) => hasClass(n, "dsh-tokstats-pairGrid"))) {
+		const cards = nodesOf(pairGrid).filter((n) => hasClass(n, "dsh-tokstats-card"));
+		assert.equal(cards.length, 2, `双列行的卡片数必须为 2，实际 ${cards.length}`);
+	}
+
+	// 只有日柱图（无 heatDaily）时，时间图那一行退化成单列。
+	const rpcDaily = makeRpcStub();
+	rpcDaily.respond(() => ({ ok: true, value: makeSummary() }));
+	const solo = setupClient({ rpc: rpcDaily });
+	const soloTree = await renderPanel(solo.react, solo.main, { t: solo.t });
+	const chartRowOf = (root) => nodesOf(root).find((n) => hasClass(n, "dsh-tokstats-pairGrid")
+		&& nodesOf(n).some((c) => textOf(c) === "每日调用量"));
+	assert.equal(chartRowOf(soloTree), undefined, "只有日柱图时时间图行不得套 pairGrid");
+	assert.ok(textOf(soloTree).includes("每日调用量"), "日柱图照常渲染");
+});
+
+test("TS-31：下方是自适应两列——卡片保持自身高度，按估算高度贪心分列", async () => {
+	const rpc = makeRpcStub();
+	// 造出「高矮悬殊」的真实形态：模型 3 行、桶固定 6 行、周 2 行、工作区 2 行。
+	rpc.respond(() => ({ ok: true, value: makeSummary({ weekly: twoWeeks() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+
+	const columnsBox = nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-columns"));
+	assert.ok(columnsBox !== undefined, "下方卡片应放进自适应列容器");
+	const columns = nodesOf(columnsBox).filter((n) => hasClass(n, "dsh-tokstats-column"));
+	assert.equal(columns.length, 2, "两列");
+	const titlesOf = (column) => nodesOf(column)
+		.filter((n) => hasClass(n, "dsh-tokstats-cardTitle"))
+		.map((n) => textOf(n));
+	// 模型排行放在左上（用户指定），其余按估算高度往较矮的那列塞。
+	assert.equal(titlesOf(columns[0])[0], "模型排行", "模型排行在左列顶部");
+	for (const column of columns) {
+		assert.ok(titlesOf(column).length >= 1, "两列都要有卡（不空列）");
+	}
+	// 五张卡全在列里，一张不少、一张不重。
+	const allTitles = columns.flatMap((column) => titlesOf(column)).sort();
+	assert.deepEqual(allTitles, ["上下文长度分布（按计费输入）", "工作区排行", "提示词整理使用情况", "模型排行", "趋势（按周）"].sort());
+
+	// 样式：列容器**不 stretch**（那正是「矮卡下方空一大片」的成因）。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	const columnsRule = css.match(/\.dsh-tokstats-columns\{([^}]*)\}/);
+	assert.ok(columnsRule !== null, "自适应列规则应存在");
+	assert.match(columnsRule[1], /align-items:flex-start/, "列内不拉伸卡片（空白只留在页尾）");
+	assert.ok(!/align-items:stretch/.test(columnsRule[1]), "不得强行等高");
+	const columnRule = css.match(/\.dsh-tokstats-column\{([^}]*)\}/);
+	assert.ok(columnRule !== null, "列规则应存在");
+	assert.match(columnRule[1], /flex-direction:column/, "列内自上而下紧挨着排");
+	assert.match(columnRule[1], /gap:10px/, "卡片间距与整页一致");
+	const breakpoint = css.match(/@media \(max-width:820px\)\{\.dsh-tokstats-columns\{([^}]*)\}/);
+	assert.ok(breakpoint !== null, "窄窗需要折成单列");
+	assert.match(breakpoint[1], /flex-direction:column/, "窄窗单列");
 });
 
 test("工作区排行：按调用次数排序并显示占比条", async () => {
@@ -1054,10 +1408,11 @@ test("TS-25：用户主动切档位时清掉后台标记，旧内容按窗口口
 		assert.equal(pendingNodeOf(tree), undefined, "后台重拉期间不该有空态（前提校验）");
 
 		const buttons = rangeButtonsOf(tree);
-		assert.equal(buttons.length, 4, "四个时间档位");
-		// 点「本月」——口径变了，属于用户主动操作。
+		assert.equal(buttons.length, 5, "五个时间档位");
+		// 点「本月」——口径变了，属于用户主动操作。按文案找而**不按下标**：
+		// 档位增删（第五批加了「当日」）会让下标静默指到别的档，断言随之假绿。
 		react.reset();
-		buttons[1].props.onClick();
+		buttons.find((b) => textOf(b) === "本月").props.onClick();
 		// 点击后 effect 重跑：这是「用户主动操作」，内容应被换成 loading 态。
 		react.runEffects();
 		react.reset();
@@ -1138,22 +1493,25 @@ test("TS-22 / AC-3：epoch 为 null 时不出现任何折叠标记（反向断�
 	}
 });
 
-test("TS-22：代表日落在合并列区间内时也要标（不只比对列首日）", async () => {
-	// 造一个 90 天窗口 + 稀疏数据：列会被合并（span > 1），代表日落在列中段。
-	// 只比对 startDay 的实现会在这种列上漏标——而它恰恰是「全部/长窗口」档最常见
-	// 的形态（那时列必然合并）。
+test("TS-22：代表日落在 7 天窗口外时不得打标（日柱图是固定 7 天，不是整窗）", async () => {
+	// 日柱图固定看最近 7 天（TS-33），而折叠区代表日通常在更早的区间末端——
+	// 那种情况下窗口里根本没有那一列，照着打标就会凭空造一个标记（TS-22 的原始判据）。
 	const rpc = makeRpcStub();
 	const daily = [
-		{ day: "2026-07-01", calls: 1, in: 100, cr: 0, cw: 0, out: 1 },
-		{ day: "2026-10-20", calls: 1, in: 100, cr: 0, cw: 0, out: 1 },
+		{ day: dayOffset(-6), calls: 1, in: 100, cr: 0, cw: 0, out: 1 },
+		{ day: dayOffset(0), calls: 1, in: 100, cr: 0, cw: 0, out: 1 },
 	];
-	rpc.respond(() => ({ ok: true, value: makeSummary({ daily, windowStart: "2026-07-01", epoch: { end: "2026-08-15", calls: 3 } }) }));
+	// epoch.end 比 7 天窗口还早 20 天 → 代表日（end - 1）落在图外。
+	rpc.respond(() => ({
+		ok: true,
+		value: makeSummary({ daily, epoch: { end: dayOffset(-20), calls: 3 } }),
+	}));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
-	const marked = barNodesOf(tree).filter((n) => n.props.className.includes("dsh-tokstats-barEpoch"));
-	assert.equal(marked.length, 1, `合并列也必须被标记，实际 ${marked.length}`);
-	// 该列的区间应覆盖 2026-08-14（= end - 1）。
-	assert.ok(String(marked[0].props.title).includes("8/14"), `tooltip 应含代表日 8/14，实际 ${marked[0].props.title}`);
+	const bars = barNodesOf(tree);
+	assert.equal(bars.length, 7, "固定 7 天窗口 → 7 根柱");
+	assert.equal(bars.filter((n) => n.props.className.includes("dsh-tokstats-barEpoch")).length, 0,
+		"代表日在图外时不得凭空造出折叠标记");
 });
 
 test("TS-21 / TS-22：词典新增键 zh/en 成对、无 provider / model 两词", () => {
@@ -1277,27 +1635,37 @@ test("TS-23：绘图区至少有 2 条水平网格线，且用主题变量（不
 	assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(lineRule[1]), "网格线规则不得出现写死的十六进制颜色");
 });
 
-test("TS-23 / AC-4：柱容器有列宽上限（3 列与 60 列都不溢出）、列少时居中", async () => {
+test("TS-23 / AC-4：柱宽有上限、列少时居中，列多时合并到 30 列", async () => {
 	injectedStyleTags.length = 0;
 	setupClient();
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
-	const barRule = css.match(/\.dsh-tokstats-bar\{([^}]*)\}/);
-	assert.ok(barRule !== null, "柱样式规则应存在");
-	assert.match(barRule[1], /max-width:48px/, "柱宽上限 48px（AC-4）");
-	const barsRule = css.match(/\.dsh-tokstats-bars\{([^}]*)\}/);
-	assert.ok(barsRule !== null, "柱容器规则应存在");
+	// 列宽上限与居中落在**共用轨道**上（TS-23 的「刻度与柱位同轨」）：柱位与
+	// 刻度槽共用一条 `trackItem` 规则，容器共用一条 `track` 规则——两份尺寸
+	// 各写一遍就是错位的来源，这里按共用规则断言，防止哪天又拆回去。
+	const itemRule = css.match(/\.dsh-tokstats-trackItem\{([^}]*)\}/);
+	assert.ok(itemRule !== null, "共用轨道条目规则应存在");
+	assert.match(itemRule[1], /max-width:48px/, "列宽上限 48px（AC-4）");
+	assert.match(itemRule[1], /flex:1/, "等分剩余宽度");
+	assert.match(itemRule[1], /min-width:3px/, "窄列下限");
+	const trackRule = css.match(/\.dsh-tokstats-track\{([^}]*)\}/);
+	assert.ok(trackRule !== null, "共用轨道容器规则应存在");
 	// 已知副作用：flex:1 + max-width 会让少列时整组挤在左侧。容器必须显式
 	// 决定余量落在哪里，否则「柱宽有上限」反而让图看起来像没画满。
-	assert.match(barsRule[1], /justify-content:center/, "少列时整组居中，不挤在左侧");
+	assert.match(trackRule[1], /justify-content:center/, "少列时整组居中，不挤在左侧");
+	assert.match(trackRule[1], /gap:2px/, "柱位与刻度槽共用同一个列间距（否则累积偏移）");
+	// 横轴不得再自己写一套布局：`space-between` 正是「标签钉在两端、柱组居中」
+	// 的错位成因。
+	const axisRule = css.match(/\.dsh-tokstats-axis\{([^}]*)\}/);
+	assert.ok(axisRule !== null, "横轴规则应存在");
+	assert.ok(!/justify-content/.test(axisRule[1]), "横轴不得自己写 justify-content（与轨道冲突）");
+	assert.ok(!/display:flex/.test(axisRule[1]), "横轴的 flex 布局来自 track 规则，不重复声明");
 
-	// 3 列与 60 列两种输入的 DOM 都不得溢出：柱位数量与柱宽上限是两件事，
-	// 这里断言「列多时不会被上限压成固定宽度」（上限只对 flex 有效，min-width
-	// 3px 保证 60 列仍能排下：60 × (3+2) = 300px < 800px 主区）。
+	// 列数由窗口决定（TS-33），但超过 30 列时按整日合并，避免每列压到 3px。
 	const rpc = makeRpcStub();
 	rpc.respond(() => ({ ok: true, value: makeSummary() }));
 	const { react, main, t } = setupClient({ rpc });
-	const three = await renderPanel(react, main, { t });
-	assert.equal(barNodesOf(three).length, 1 + 1, "夹具只有 2 个数据日 → 2 列");
+	const twoDays = await renderPanel(react, main, { t });
+	assert.equal(barNodesOf(twoDays).length, 1 + 1, "夹具只有 2 个数据日 → 2 列");
 
 	const manyDaily = [];
 	for (let i = 0; i < 60; i += 1) {
@@ -1305,11 +1673,10 @@ test("TS-23 / AC-4：柱容器有列宽上限（3 列与 60 列都不溢出）�
 		manyDaily.push({ day: d, calls: i + 1, in: 100, cr: 0, cw: 0, out: 1 });
 	}
 	const rpc60 = makeRpcStub();
-	rpc60.respond(() => ({ ok: true, value: makeSummary({ daily: manyDaily, windowStart: "2026-07-23" }) }));
+	rpc60.respond(() => ({ ok: true, value: makeSummary({ daily: manyDaily, windowStart: "2026-07-23", windowDays: 0 }) }));
 	const setup60 = setupClient({ rpc: rpc60 });
 	const sixty = await renderPanel(setup60.react, setup60.main, { t: setup60.t });
-	const columns = barNodesOf(sixty).length;
-	assert.equal(columns, 60, `60 天窗口应逐日 60 列，实际 ${columns}`);
+	assert.ok(barNodesOf(sixty).length <= 30, `列数不得超过 30，实际 ${barNodesOf(sixty).length}`);
 });
 
 test("TS-23：sqrt 刻度可被识别（绘图区 tooltip 有口径说明，且不是裸 Math.sqrt 文案）", async () => {
@@ -1323,6 +1690,27 @@ test("TS-23：sqrt 刻度可被识别（绘图区 tooltip 有口径说明，且�
 	// 说明必须落在界面上（title 是鼠标可达的最短路径），且不能是纯英文术语。
 	assert.ok(title.length > 0, "绘图区必须有刻度口径说明");
 	assert.ok(/平方根|平方根刻度/.test(title), `说明须点明平方根刻度，实际 ${title}`);
+});
+
+test("TS-23：图表是两行 grid——纵轴与绘图区同高，横轴落在绘图区那一列", async () => {
+	// 这条钉住的是「日期刻度对齐柱位」的**结构前提**：如果横轴落到第 2 行第 1 列
+	// （纵轴那一列），`auto` 列宽会被刻度槽撑到 300+px，绘图区被推右、标签挤成一团；
+	// 如果纵轴写死高度，卡片一被拉伸 0 刻度就浮在柱体中部。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	const chartRule = css.match(/\.dsh-tokstats-chart\{([^}]*)\}/);
+	assert.ok(chartRule !== null, "图表容器规则应存在");
+	assert.match(chartRule[1], /display:grid/, "图表容器用 grid（纵轴要与绘图区同高，横轴不在刻度列的参照范围内）");
+	assert.match(chartRule[1], /grid-template-rows:minmax\(0,1fr\) auto/, "第 1 行吃满剩余高度，第 2 行放横轴");
+	assert.match(chartRule[1], /flex:1/, "卡片被拉伸时绘图区跟着长高，而不是留白");
+	const axisRule = css.match(/\.dsh-tokstats-axis\{([^}]*)\}/);
+	assert.match(axisRule[1], /grid-area:2\/2/, "横轴必须显式落在第 2 行、绘图区那一列");
+	const axisYRule = css.match(/\.dsh-tokstats-axisY\{([^}]*)\}/);
+	assert.ok(axisYRule !== null, "纵轴规则应存在");
+	assert.match(axisYRule[1], /grid-area:1\/1/, "纵轴只跨绘图区那一行");
+	assert.match(axisYRule[1], /height:auto/, "纵轴高度跟随 grid 行（写死像素时被拉伸就会错位）");
+	assert.ok(!/(?:^|;)height:\d+px/.test(axisYRule[1]), "纵轴不得写死高度（line-height 不算）");
 });
 
 test("TS-23：峰值柱顶部标数值，其余柱只留 tooltip", async () => {
@@ -1346,11 +1734,28 @@ test("TS-23：峰值柱顶部标数值，其余柱只留 tooltip", async () => {
 		.flatMap((n) => nodesOf(n))
 		.filter((n) => typeof n.props.className === "string" && n.props.className.includes("dsh-tokstats-barPeak"));
 	assert.equal(otherLabels.length, 0, "非峰值柱不标数值");
+
+	// 窗口固定 7 列（TS-33），列宽足够，峰值标签**永远**只有一根且不会被相邻柱
+	// 压住——「列密时不标」的分支已随固定窗口一起删除。
+	const sevenDayDaily = [];
+	for (let i = 6; i >= 0; i -= 1) {
+		sevenDayDaily.push({ day: dayOffset(-i), calls: i + 1, in: 100, cr: 0, cw: 0, out: 1 });
+	}
+	const rpcSeven = makeRpcStub();
+	rpcSeven.respond(() => ({ ok: true, value: makeSummary({ daily: sevenDayDaily }) }));
+	const seven = setupClient({ rpc: rpcSeven });
+	const sevenTree = await renderPanel(seven.react, seven.main, { t: seven.t });
+	assert.equal(barNodesOf(sevenTree).length, 7, "7 列");
+	assert.equal(nodesOf(sevenTree).filter((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-barPeak(?:\s|$)/.test(n.props.className)).length, 1,
+		"7 列下峰值标签仍在，且只有一根");
 });
 
 test("TS-17 / AC-5：KPI 四卡副值两两不等，且每张是对主值的拆分（不复述他卡）", async () => {
 	const rpc = makeRpcStub();
-	rpc.respond(() => ({ ok: true, value: makeSummary() }));
+	// 明确给 7 天窗口：副值形态取决于窗口天数（1 天给份额、多天给日均），
+	// 夹具缺省的 windowDays 是 90，会把日均算成 0.0。
+	rpc.respond(() => ({ ok: true, value: makeSummary({ windowDays: 7 }) }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
 	const hints = nodesOf(tree)
@@ -1359,6 +1764,8 @@ test("TS-17 / AC-5：KPI 四卡副值两两不等，且每张是对主值的拆�
 	assert.equal(hints.length, 4, "四张卡各有副值");
 	assert.equal(new Set(hints).size, 4, `四卡副值两两不等，实际 ${JSON.stringify(hints)}`);
 
+	// 「调用次数」副值 = 日均（多天窗口）：夹具 3 次 / 7 天 = 0.4。
+	assert.match(hints[0], /^日均 0\.4 次$/, `调用次数副值应为日均，实际 ${hints[0]}`);
 	// 「缓存命中率」副值给的是这个百分比的分子 / 分母（命中 tokens / 计费输入），
 	// 而不是复述「缓存读」这个已经在「输入」卡拆分里出现过的数字。
 	// 夹具：cr = 3000 / billed = 204000 → 1%。
@@ -1395,30 +1802,61 @@ test("TS-17：输出副值在计费输入为 0 时给破折号，不编一个 0%
 	assert.equal(hints[2], "\u2014", `输入为 0 时输出副值应为破折号，实际 ${hints[2]}`);
 });
 
-test("AC-6：2:1 行用 stretch 对齐（不再用 start 留出空洞）", () => {
+test("AC-6：时间图行是唯一 1:1 双列（等高交给 stretch），下方已无固定双列栅格", () => {
 	injectedStyleTags.length = 0;
 	setupClient();
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
-	const rule = css.match(/\.dsh-tokstats-rowGrid\{([^}]*)\}/);
-	assert.ok(rule !== null, "2:1 行规则应存在");
+	const rule = css.match(/\.dsh-tokstats-pairGrid\{([^}]*)\}/);
+	assert.ok(rule !== null, "双列行规则应存在");
+	assert.match(rule[1], /grid-template-columns:1fr 1fr/, "时间图行 1:1（不再有 2fr 1fr）");
 	assert.match(rule[1], /align-items:stretch/, "同行卡片等高（AC-6）");
 	assert.ok(!/align-items:start/.test(rule[1]), "不得退回 start（会留出空洞）");
+	// 2:1 的第二套比例已删除：两套比例并存时每行栏线都不一样，整页像拼起来的。
+	assert.ok(!/\.dsh-tokstats-rowGrid\{/.test(css), "不得残留 2:1 行规则");
 });
 
-test("AC-7：选中态用品牌色 + 反色文字（不是与容器底只差几级的 bg-layer-2）", () => {
+test("AC-7：选中态用数据色实心 + 挖空文字（不是与容器底只差几级的 bg-layer-2）", () => {
 	injectedStyleTags.length = 0;
 	setupClient();
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
 	const rule = css.match(/\.dsh-tokstats-switchOn\{([^}]*)\}/);
 	assert.ok(rule !== null, "选中态规则应存在");
-	assert.match(rule[1], /background:var\(--dsw-alias-brand-primary\)/, "选中态用品牌色底（AC-7）");
-	assert.match(rule[1], /color:var\(--dsw-alias-label-primary-inverted\)/, "配反色文字保证可读");
+	// 第五批起选中态与图表共用 `--dsh-tokstats-accent`（品牌蓝）：brand-primary 在
+	// 暗色里近白、亮色里近黑，选中项看起来只是一个「白色小方块」，且与数据区
+	// 完全不同的颜色语言。
+	assert.match(rule[1], /background:var\(--dsh-tokstats-accent\)/, "选中态用数据色底（AC-7）");
+	assert.match(rule[1], /color:var\(--dsh-tokstats-on-accent\)/, "配挖空文字保证可读");
 	assert.ok(!/bg-layer-2/.test(rule[1]), "不得退回 bg-layer-2（实测只差 9 级灰度）");
 	// hover 规则必须紧跟：`.switch:hover` 的特异性高于 `.switchOn` 这个单类，
-	// 不补 `.switchOn:hover` 时鼠标停在选中项上会把品牌色底覆盖回灰。
+	// 不补 `.switchOn:hover` 时鼠标停在选中项上会把数据色底覆盖回灰。
 	const hoverRule = css.match(/\.dsh-tokstats-switchOn:hover\{([^}]*)\}/);
 	assert.ok(hoverRule !== null, "选中态 hover 规则应存在（否则悬停时选中态消失）");
-	assert.match(hoverRule[1], /background:var\(--dsw-alias-brand-primary\)/);
+	assert.match(hoverRule[1], /background:var\(--dsh-tokstats-accent\)/);
+});
+
+test("TS-32：面板有自己的数据色——取自宿主业务色（品牌蓝），不是零色相的 brand-primary", () => {
+	// 这条是「面板不再整块灰阶」的唯一防线：brand-primary 在暗色主题里是
+	// neutral-bluish-50（近白）、亮色里是 bluish-1000（近黑），拿它当数据色
+	// 等于没有色相。业务色是宿主自己的品牌蓝，且是 focus ring 的 fallback。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	const pageRule = css.match(/\.dsh-tokstats-page\{([^}]*)\}/);
+	assert.ok(pageRule !== null, "页面骨架规则应存在");
+	assert.match(pageRule[1], /--dsh-tokstats-accent:var\(--dsw-alias-state-business-primary,var\(--dsw-alias-brand-primary\)\)/,
+		"数据色取业务色，缺该 token 时回落 brand-primary（不变成无色）");
+	assert.match(pageRule[1], /--dsh-tokstats-on-accent:var\(--dsw-alias-bg-layer-1\)/,
+		"蓝底上的文字取卡片底色（挖空），两套主题都自然可读");
+	// 所有「表示量」的色块都必须用数据色；漏一处就会出现「一半蓝一半白」。
+	for (const [ruleName, body] of [
+		["柱体", css.match(/\.dsh-tokstats-barFill\{([^}]*)\}/)],
+		["比例条", css.match(/\.dsh-tokstats-meterFill\{([^}]*)\}/)],
+		["峰值标签", css.match(/\.dsh-tokstats-barPeak\{([^}]*)\}/)],
+	]) {
+		assert.ok(body !== null, `${ruleName}规则应存在`);
+		assert.match(body[1], /var\(--dsh-tokstats-(accent|on-accent)\)/, `${ruleName}必须用数据色`);
+		assert.ok(!/var\(--dsw-alias-brand-primary\)/.test(body[1]), `${ruleName}不得退回 brand-primary`);
+	}
 });
 
 test("TS-17 / TS-23：词典新增键 zh/en 成对、无 provider / model 两词", () => {
@@ -1745,7 +2183,7 @@ test("AC-11：键盘导航——←/→ 跨日、↑/↓ 跨周、Enter/Space �
 	let prevented = 0;
 	left.grid.props.onKeyDown({ key: "ArrowRight", preventDefault: () => { prevented += 1; } });
 	assert.equal(prevented, 1, "方向键应 preventDefault（避免页面滚动）");
-	// Enter 选中 → 进单日模式：四档置灰 + 面包屑出现。
+	// Enter 选中 → 进单日模式：五档置灰 + 面包屑出现。
 	const cur = cursorAfter(() => main.comp({ t }));
 	cur.grid.props.onKeyDown({ key: "Enter", preventDefault: () => {} });
 	react.reset();
@@ -1755,9 +2193,9 @@ test("AC-11：键盘导航——←/→ 跨日、↑/↓ 跨周、Enter/Space �
 	const single = renderDeep(react, main.comp({ t }));
 	const switches = nodesOf(single).filter((n) => typeof n.props.className === "string"
 		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
-	assert.ok(switches.length > 0, "应有四档按钮");
-	assert.ok(switches.every((n) => n.props.disabled === true), "单日模式下四档全部置灰");
-	// Esc 退出：四档恢复可用。
+	assert.ok(switches.length > 0, "应有五档按钮");
+	assert.ok(switches.every((n) => n.props.disabled === true), "单日模式下五档全部置灰");
+	// Esc 退出：五档恢复可用。
 	const grid4 = heatGridOf(single);
 	grid4.props.onKeyDown({ key: "Escape", preventDefault: () => {} });
 	react.reset();
@@ -1767,7 +2205,7 @@ test("AC-11：键盘导航——←/→ 跨日、↑/↓ 跨周、Enter/Space �
 	const back = renderDeep(react, main.comp({ t }));
 	const switchesBack = nodesOf(back).filter((n) => typeof n.props.className === "string"
 		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
-	assert.ok(switchesBack.every((n) => n.props.disabled !== true), "Esc 退出后四档恢复可用");
+	assert.ok(switchesBack.every((n) => n.props.disabled !== true), "Esc 退出后五档恢复可用");
 });
 
 test("AC-12：热力图词典键 zh/en 成对、整句模板、无残留占位符", () => {
@@ -1781,7 +2219,17 @@ test("AC-12：热力图词典键 zh/en 成对、整句模板、无残留占位�
 		"heat.cellTip.one", "heat.cellTip.other",
 		"heat.empty", "heat.folded", "heat.foldedAria", "heat.keyHint",
 		"crumb.exit", "crumb.aria", "kpi.callsHintShare", "single.folded",
+		// 第五批（TS-30）：新增「当日」档位标签；四卡跟随档位后恢复日均 / 全历史两个副值键。
+		"range.today", "kpi.callsHintDays", "kpi.callsHintAll",
 	];
+	// 上一版「四卡固定当日」留下的两个键已无消费方：口径说明行随四卡跟随档位一起
+	// 撤掉（口径由档位开关表达），「占所选区间」也被「日均 / 占 84 天」取代。
+	// 残留键的坏处是误导（让人以为还有一条按窗口比份额的路径），不是占位。
+	const removed = ["kpi.scopeToday", "kpi.callsHintRange"];
+	for (const key of removed) {
+		assert.ok(!Object.prototype.hasOwnProperty.call(zh, key), `zh 不应残留旧键 ${key}`);
+		assert.ok(!Object.prototype.hasOwnProperty.call(en, key), `en 不应残留旧键 ${key}`);
+	}
 	for (const key of added) {
 		assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `zh 缺键 ${key}`);
 		assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en 缺键 ${key}`);
@@ -1815,21 +2263,37 @@ test("样式：热力图折叠格用斜纹 + 主题变量，且不复用柱图�
 	// **类名必须与柱图的折叠类名分开**：共用会让「改柱图的折叠样式」意外改到热力图。
 	assert.ok(!/\.dsh-tokstats-heatFolded[^{]*\{[^}]*\.dsh-tokstats-barEpoch/.test(tag.textContent),
 		"热力图折叠样式不得引用柱图折叠类名");
-	// 五档色阶必须全是品牌色 + 透明度，不得出现五个不同主题色（SPEC D8）。
+	// 五档色阶必须全是**同一个数据色** + 明度梯度，不得出现五个不同色相（SPEC D8）。
+	// 第五批从「品牌色 + opacity」改成 `color-mix(accent N%, 面板格底色)`：
+	// opacity 会把背后的卡片底色一起透出来，暗色下第一档几乎与零日格同色；
+	// 且图例要跟格子对得上，opacity 方案得让图例自己再叠一层、算出来不是一个颜色。
 	const levels = [1, 2, 3, 4, 5].map((lv) => {
-		const marker = '.dsh-tokstats-heatCell[data-level="' + lv + '"]{';
+		const marker = '.dsh-tokstats-ramp[data-level="' + lv + '"]{';
 		const at = tag.textContent.indexOf(marker);
 		if (at < 0) return null;
 		const from = at + marker.length;
 		const to = tag.textContent.indexOf("}", from);
 		return to < 0 ? null : tag.textContent.slice(from, to);
 	});
-	assert.ok(levels.every((v) => v !== null), "五档色阶规则都应存在");
-	for (const body of levels) {
-		assert.match(body, /background:var\(--dsw-alias-brand-primary\)/, "五档都必须用同一个品牌色");
-		assert.match(body, /opacity:/, "档位靠透明度区分");
+	assert.ok(levels.every((v) => v !== null), "五档色阶规则都应存在（共用 ramp 类，图例与格子同一套）");
+	for (const [i, body] of levels.entries()) {
+		assert.match(body, /background:/, `第 ${i + 1} 档必须有底色`);
+		assert.ok(!/var\(--dsw-alias-brand-primary\)/.test(body), "不得退回零色相的 brand-primary");
+		assert.ok(!/opacity:/.test(body), "档位不得靠 opacity（会把卡片底色一起透出来，第一档与零日格无法区分）");
 		assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(body), "不得写死十六进制颜色");
 	}
+	// 第 1–4 档用数据色与面板格底色按比例调和，第 5 档就是数据色本身。
+	for (const body of levels.slice(0, 4)) {
+		assert.match(body, /color-mix\(in srgb,var\(--dsh-tokstats-accent\) \d+%,var\(--dsh-tokstats-cell\)\)/,
+			"档位 = 数据色按比例混入面板格底色");
+	}
+	assert.match(levels[4], /background:var\(--dsh-tokstats-accent\)/, "最档就是数据色本身");
+	// 零日格底色（`--dsh-tokstats-cell`）不得直接取 bg-layer-2：亮色主题里
+	// layer-1 / layer-2 都是纯白，零日格会隐形、整张热力图只剩有量的几格浮着。
+	const cellRule = tag.textContent.match(/\.dsh-tokstats-heatCell\{([^}]*)\}/);
+	assert.ok(cellRule !== null, "格子规则应存在");
+	assert.match(cellRule[1], /background:var\(--dsh-tokstats-cell\)/, "零日格底色走面板格底色");
+	assert.ok(!/background:var\(--dsw-alias-bg-layer-2\)/.test(cellRule[1]), "不得直接用 bg-layer-2（亮色下等于隐形）");
 	// 网格必须按列填（grid-auto-flow:column）+ 固定 7 行：否则 12 个格子会横排
 	// 成一行，列不再是自然周。
 	const gridRule = tag.textContent.match(/\.dsh-tokstats-heat\{([^}]*)\}/);
@@ -1885,7 +2349,14 @@ function makeSingleDayFixture({ targetOffset = -3, targetCalls = 2430, otherCall
 					? [{ day, calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 }]
 					: [{ day: target, calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 },
 						{ day: dayOffset(-2), calls: otherCalls, in: 1000, cr: 0, cw: 0, out: 10 }],
-				weekly: [{ weekStart: dayOffset(-6), calls: targetCalls + otherCalls, in: 2000, cr: 0, cw: 0, out: 20 }],
+				// 单日模式下 host 的 daily 只有一天 → weekly 只有一行（客户端据此隐藏卡片）；
+				// 区间模式给两周，才能对照出「单日隐藏周趋势」。
+				weekly: single
+					? [{ weekStart: weekStartOf(day), calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 }]
+					: [
+						{ weekStart: weekStartOf(dayOffset(-10)), calls: otherCalls, in: 1000, cr: 0, cw: 0, out: 10 },
+						{ weekStart: weekStartOf(target), calls: targetCalls + otherCalls, in: 2000, cr: 0, cw: 0, out: 20 },
+					],
 				workspaces: [{ path: "D:\\proj\\alpha", calls: targetCalls, in: 1000, out: 10, cr: 0, cw: 0 }],
 				routes: [{ rt: "x/y", calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 }],
 				totals: { calls: targetCalls, in: 1000, cr: 0, cw: 0, out: 10 },
@@ -1938,35 +2409,35 @@ async function renderPanelClean(react, main, props) {
 	return tree;
 }
 
-test("AC-10：单日模式下四档按钮全部置灰（置灰不隐藏）", async () => {
+test("AC-10：单日模式下五档按钮全部置灰（置灰不隐藏）", async () => {
 	const fixture = makeSingleDayFixture();
 	const { react, main, t } = setupClient({ rpc: fixture.rpc });
 	const tree = await enterSingleDay(react, main, t, fixture.target);
 	const switches = nodesOf(tree).filter((n) => typeof n.props.className === "string"
 		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
-	assert.equal(switches.length, 4, "四档按钮应仍在（置灰不隐藏，避免工具条高度变化）");
-	assert.ok(switches.every((n) => n.props.disabled === true), "单日模式下四档全部置灰");
+	assert.equal(switches.length, 5, "五档按钮应仍在（置灰不隐藏，避免工具条高度变化）");
+	assert.ok(switches.every((n) => n.props.disabled === true), "单日模式下五档全部置灰");
 	// 区间模式下它们必须是可用的（否则这条断言在「永远 disabled」的实现下也会绿）。
 	const fresh = setupClient({ rpc: makeSingleDayFixture().rpc });
 	const rangeOnly = await renderPanelClean(fresh.react, fresh.main, { t: fresh.t });
 	const rangeSwitches = nodesOf(rangeOnly).filter((n) => typeof n.props.className === "string"
 		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
-	assert.ok(rangeSwitches.every((n) => n.props.disabled !== true), "区间模式下四档必须可用");
+	assert.ok(rangeSwitches.every((n) => n.props.disabled !== true), "区间模式下五档必须可用");
 });
 test("AC-10：单日下日柱图隐藏、周趋势卡隐藏（裁决 A）", async () => {
 	const fixture = makeSingleDayFixture();
 	const { react, main, t } = setupClient({ rpc: fixture.rpc });
-	const rangeTree = await renderPanel(react, main, { t });
+	// 一律走 renderPanelClean / enterSingleDay：`renderPanel` 会留下错位的 hook
+	// 序号与累积的 effect，点完格再渲染时会读到旧闭包（请求里没有 day）。
+	const rangeTree = await renderPanelClean(react, main, { t });
 	// 对照：区间模式下两张卡都在（否则下面的「隐藏」可能是它们从来没渲染过）。
 	assert.ok(nodesOf(rangeTree).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-chartPlot")),
 		"区间模式应有日柱绘图区");
-	assert.ok(nodesOf(rangeTree).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-table")),
-		"区间模式应有周趋势表");
-	clickDayCell(rangeTree, fixture.target);
-	const single = await renderPanel(react, main, { t });
+	assert.ok(textOf(rangeTree).includes("趋势（按周）"), "区间模式应有周趋势卡（夹具给两周）");
+	const single = await enterSingleDay(react, main, t, fixture.target);
 	assert.ok(!nodesOf(single).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-chartPlot")),
 		"单日下日柱图必须隐藏（只剩一根孤柱，热力图已覆盖该职责）");
-	assert.ok(!nodesOf(single).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-table")),
+	assert.ok(!textOf(single).includes("趋势（按周）"),
 		"单日下周趋势卡必须隐藏（那一行周合计与 totals 完全相同，是复述主值）");
 	// 桶分布 / 模型排行 / 工作区排行仍要在（正常重算成那一天）。
 	assert.ok(nodesOf(single).some((n) => String(n.props.className ?? "").includes("dsh-tokstats-meter")),
@@ -2020,7 +2491,7 @@ test("AC-10：面包屑出现，点「全部区间」退出单日模式", async 
 		"退出后面包屑消失");
 	const switches = nodesOf(back).filter((n) => typeof n.props.className === "string"
 		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
-	assert.ok(switches.every((n) => n.props.disabled !== true), "退出后四档恢复可用");
+	assert.ok(switches.every((n) => n.props.disabled !== true), "退出后五档恢复可用");
 });
 
 test("AC-10：点已选中的格退出单日模式（第二个出口）", async () => {
