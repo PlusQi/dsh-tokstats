@@ -22,7 +22,7 @@ git tag vX.Y.Z; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安�
 **打 tag 前的硬门槛**：link 安装目标提交 -> 重启 dsh web -> 刷新页面，目检**每个插件**的 UI 元素实际渲染。"启动无报错 ≠ 插件正常工作"——slot 注册是副作用，apply 提前返回或抛错都可能静默失效。目检不过不打 tag。
 
 推上去即可被安装，无需注册表。`files` 字段保证打包形态（git 安装 / npm 安装都走打包）只带运行必需件加文档：
-`lib/` + `icon.svg` + `cordis.patch.yml` + `AGENTS.md` / `CHANGELOG.md` / `docs/MAINTAINING.md` / `docs/INVARIANTS.md`（README / LICENSE / package.json 由打包器自动附带，不必列）。
+`lib/` + `icon.svg` + `cordis.patch.yml` + `locale/` + `screenshots.json` + `docs/assets/` 下的截图与位图店招（README 嵌图与市场卡片图，**漏了则打包形态下 README 图片断链、市场卡片丢图**）+ `AGENTS.md` / `CHANGELOG.md` / `docs/MAINTAINING.md` / `docs/INVARIANTS.md`（README / LICENSE / package.json 由打包器自动附带，不必列）。
 `icon.svg` **必须**在 `files` 里：`package.json` 的 `icon` 指向它，宿主按包内相对路径读成 data URL 内联；漏了只会在插件元数据里留一条 `meta.error`，界面表现是「没有图标」而不是报错。
 
 **本包只从 GitHub 分发**：不要在任何文档里写「从 npm 装 `dsh-plugins`」——npm 上那个名字是别人的包，见下节「分发与元数据纪律」。
@@ -259,6 +259,21 @@ barePackageName(specifier)                        ← 必须是裸包名
 - **改完必须目检**：静态项只能证明「结构对」，证明不了「宿主真的加载了新元数据」。重启宿主（desktop profile 由 Electron 独占，要退出应用重开，不是关窗口）→ 设置 → 插件 → 看「已安装插件」卡片的标题与描述；切英文应变成 `locale/en.json` 的内容。`npm test` 与 guard 都覆盖不到这一步。
 - **`files` 只能用 `npm pack --dry-run --json` 验**：本机 `link:` 安装是 junction 直通仓库，`files` 白名单根本不生效，link 下永远看不出丢文件。
 
+
+### 市场卡片（dsh-market / awesome-dsh-plugin）的三处数据源
+
+卡片不是宿主画的，是市场按目录数据渲染的。想改卡上什么，就去改对应的源：
+
+| 卡上元素 | 数据源 | 生效路径 |
+| --- | --- | --- |
+| 简介文案 | 目录仓库 `awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/PlusQi__dsh-tokstats.yml` 的 `description.{en,zh}`（**手写字段**） | 提 PR 精确替换，合并后站点重建即换 |
+| 截图顺序与内容 | 本仓库 `screenshots.json`（1–8 张相对路径；目录 nightly 构建重读，raw HEAD 直出） | **推仓库即生效，不用 PR**；不声明则市场退回抽 README 图 |
+| 图标 | 条目 YAML 的 `icon:` 指向包内 `docs/assets/icon-180.png`（只收 GitHub 托管位图，约 96px 方形显示） | 换文件即生效 |
+| 「宿主要求未知」chip | 市场读目录条目的 engines 信息，而条目 schema 没有该字段——`package.json` 的 `engines.dsh` 不会被采集 | 仓库侧无解；发 npm（registry manifest 天然带 engines）或找目录维护者 |
+
+- 收录事实（2026-10-25 核验）：条目 `PlusQi/dsh-tokstats`，`added 2026-10-23`，category `usage`，安装命令 `github:PlusQi/dsh-tokstats`（未固定 ref，默认分支最新）。另一家目录 dshpluginhub.ai 的收录停留在旧名 `dsh-plugins` + pre-rename commit，**勿以它为准**。
+- 截图序按「卡片可读性」排：宽幅在前（tokprev / promptopt / hero），近方形全图垫底——卡片首屏只展示前两张。
+- 可选大招（未做）：打 GitHub Release 预构建 tarball + 条目加 `tarball:` 字段，市场优先展示它、免 `allowBuilds` 警告；发 npm 则连 engines chip 一起解掉。两者都动「不发 registry」的既定发布线，需维护者裁决。
 
 ## 维护须知
 

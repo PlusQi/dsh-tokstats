@@ -50,7 +50,9 @@ npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
 
 看看token花了多少，谁花得多？
 
-![tokstats 面板效果示意（示例数据）](./docs/assets/tokstats.png)
+![tokstats 面板概览（示例数据）](./docs/assets/tokstats-hero.png)
+
+![tokstats 完整面板（示例数据）](./docs/assets/tokstats.png)
 
 侧栏「Token 用量统计」进入全局面板：
 

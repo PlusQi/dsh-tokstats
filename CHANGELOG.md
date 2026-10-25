@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **市场卡片与插件页简介统一为「token 花在哪一目了然」，截图改宽幅优先**：dsh-market 卡片上的简介是收录进 awesome-dsh-plugin 目录时生成的摘要，带着「宿主会话投影单元」「采纳才写回」两处实现黑话——浏览者三秒内读不懂这个插件给自己带来什么；卡片首屏两张又是 tokstats 中/英版的近方形竖图（1536×1856，比例 0.83），缩进卡片里小而糊，且两版近乎重复、白费一轮播位。本次三处同义改写 + 截图重排：
+  - **`locale/{zh,en}.json` 的 `meta.description`**（宿主设置 → 插件页显示的那句）改为痛点句式：「token 花在哪一目了然：跨会话用量统计、模型与工作区排行，附发送前预告与草稿整理。」/ `See where your tokens go: cross-session usage stats with model and workspace breakdowns, plus a next-turn forecast.`；
+  - **`package.json` 的 `description`**（npm 元数据与宿主 `listBundles`）同步去掉「注册官方会话投影单元」等实现措辞，改为同一句式并保留三个插件名（tokstats / tokprev / promptopt）供检索——爬虫若重新生成目录摘要，源材料一致才不会漂回黑话；
+  - **`screenshots.json` 按「卡片可读性」重排并新增 hero 图**：宽幅在前（tokprev 5.25 → `tokstats-hero` 2.19 → promptopt 3.38 → 各宽幅英文版），近方形全图垫底。hero 由现成的 tokstats 全图裁出（1536×700：标题 + KPI 四卡 + 每日柱图 + 热力图），README 中英与市场卡片共用；卡片图走 raw HEAD 直出，**推仓库后目录下一次 nightly 构建即生效，无需 PR**。
+  - 目录条目里的 `description` 是手写 YAML 字段（`awesome-dsh-plugin` 仓库的 `data/plugins/PlusQi__dsh-tokstats.yml`），需另提 PR 精确替换——截图换序不等它，文案换句要等。
+
 ## [0.8.0] - 2026-10-25
 
 > **状态**：本段对应 tag `v0.8.0`。此后未发布内容重新挂回 `[Unreleased]` 段。

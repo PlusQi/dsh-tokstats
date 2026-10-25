@@ -1,7 +1,7 @@
 {
   "name": "dsh-tokstats",
   "version": "0.8.0",
-  "description": "个人 DSH 扩展集：单轮 token 三点式预告（tokprev）、跨会话 token 分析全局面板（tokstats，注册官方会话投影单元）与 composer 草稿保真结构化重排（promptopt，含 host 旁路模型调用与使用计数）等插件的集合包",
+  "description": "token 花在哪一目了然：tokstats 跨会话用量统计（模型与工作区排行）、tokprev 发送前 token 预告、promptopt 草稿结构化整理。",
   "type": "module",
   "main": "lib/index.js",
   "icon": "icon.svg",
@@ -60,6 +60,7 @@
     "lib",
     "locale",
     "screenshots.json",
+    "docs/assets/tokstats-hero.png",
     "docs/assets/tokstats.png",
     "docs/assets/tokstats-en.png",
     "docs/assets/tokprev.png",

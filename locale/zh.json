@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token 用量工具箱",
-    "description": "DSH 的单轮 token 预告、跨会话用量分析与提示词结构化重排（采纳才写回）。"
+    "description": "token 花在哪一目了然：跨会话用量统计、模型与工作区排行，附发送前预告与草稿整理。"
   }
 }
