@@ -29,9 +29,22 @@ git tag vX.Y.Z; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安�
 
 **`docs/INVARIANTS.md` 必须进包**：AGENTS.md 的路由表指向它，包内若缺这份文件，装包者拿到的就是一张指空的必读清单。同理，AGENTS.md 里不得再引用 `docs/specs/`（本地 gitignored，不随包分发）——需要引证据时引 `docs/INVARIANTS.md` 的行号。
 
-`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。六个文件合计约 900 KB（实测 `npm pack` 总体积 **0.93 MB** / 22 个文件，可用 `npm pack --dry-run --json` 复核），是包体增长的主要来源；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的六条。
+`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。六个文件合计约 690 KB（其中 tokstats 两张约 380 KB，`--dpr 1.6` 出的 1600×1884），是包体增长的主要来源；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的六条（`npm pack --dry-run --json` 可复核实际体积）。
 
-**截图必须跟着界面改，不能长期复用**：v0.7.1 之前 README 用的是 v0.6.0 前后的图，图里还画着三档时间窗、7 个 2 的幂桶和已删除的每轮徽标——读者照着旧图找界面会以为装错了版本。改 `.dsh-tokstats-switch` 档位、桶边界、或删掉某个 slot 时，**同批重截对应截图**；判据是「图里的每一处文案都能在 `lib/client.js` 的词典里找到」。截图用无头 Edge + CDP 抓（`PrintWindow` 抓不到 Chromium 的 GPU 合成内容，实测整片空白），宿主 locale 跟 `--lang=en-US` 走，中英各一套。
+**截图必须跟着界面改，不能长期复用**：v0.7.1 之前 README 用的是 v0.6.0 前后的图，图里还画着三档时间窗、7 个 2 的幂桶和已删除的每轮徽标——读者照着旧图找界面会以为装错了版本。改 `.dsh-tokstats-switch` 档位、桶边界、或删掉某个 slot 时，**同批重截对应截图**；判据是「图里的每一处文案都能在 `lib/client.js` 的词典里找到」。
+
+tokstats 的两张图由 `scripts/render-screenshots.mjs` 生成，**不再从真宿主截图**：
+
+```bash
+node scripts/render-screenshots.mjs --lang zh   # → docs/assets/tokstats.png
+node scripts/render-screenshots.mjs --lang en   # → docs/assets/tokstats-en.png
+```
+
+- **数据是脚本内固定的示例**（模型 `example/*` / `demo/*`、工作区 `D://projects//*`、128 个会话）：真宿主截图必然带本机的模型名、工作区路径与会话标题，那些不该进公开仓库；固定示例也让任何人跑出来的图一致。
+- **渲染走真实产物**：脚本经 `test/client-harness.mjs` 捕获真实 `lib/client.js`，用真实组件树 + 真实 CSS 落成静态页，再用无头 chromium 截图——手抄 DOM 只能证明「抄的那份能对齐」。主题 token 取自 `app.asar` 的两个主题块（`body` = 亮色、`body[data-ds-dark-theme]` = 暗色），`--theme light` 可出亮色版。
+- **默认是「近 30 天」档**（`--range` 可换）：这一档能同时看到逐日柱图、周趋势条列表（含本周「进行中」）与自适应两列，信息最全；缺省「当日」档看不到周趋势卡，不适合当效果图。
+- 需要指定浏览器时用 `--chrome <path>`（或 `CHROME_PATH`），否则按 Playwright 的缓存目录找；找不到时退回 PATH 上的 `chrome`。
+- 尺寸固定 `960×1160 @1.6x`（输出 1600×1884）：`--dpr 1` 在 HiDPI 屏上发虚，`--dpr 2` 体积翻倍而 README 显示宽度只有约 800px。
 
 ## 新增插件（本包的维护模式）
 
@@ -107,20 +120,39 @@ UI slot `conversation.composer.dock`（**只此一个**：`conversation.chat.ass
     - 旧 host 消费方（读不到这两个字段）不受影响：纯增量、可缺省，client 走 `undefined` 分支（与 `routes` / `daily` 同一手法）；新 client + 旧 host 时整句不渲染、不打标、不抛错。
   - **client 侧消费（第二批）**：页脚渲染 `已统计 N 个会话`，`skipped > 0` 时追加 `· 跳过 M 个（日志不可读）`；`skipped === 0` **不渲染**那半句（不写「跳过 0 个」这种假零）。日柱里代表日落在该列区间的柱子带 `dsh-tokstats-barEpoch` 类（斜纹 + 次要底色）并在 tooltip 写明「含折叠历史（区间末归并）· N 次」。
   - **热力图与单日模式（第四批，TS-28 / TS-29）**：本批给 `summary` 端点加了**一个并列入参**（`day`）与**三个纯增量输出字段**（`heatDaily` / `epoch.start` / `dayFolded`），不改折叠策略、不进投影状态。
-    - **`day` 入参与优先级**：`day` 存在时**覆盖** `windowDays`（SPEC 裁决 C，显式裁决不是实现巧合）。它**不改** TS-20 的「四档共用 `windowDays` 一个入参」契约——client 在单日模式下**仍会传 `windowDays`**（它不知道 host 的优先级规则，传了也无害），所以两者必须能并存：若改成「同时传就报错」，面板在单日下会整块空态，比「静默按 day 算」糟得多。**明细过滤必须双端钳**（`if (day !== undefined && cell.d !== day) continue;`）——只把 `windowStart` 换成 `day` 的语义是「下界」，会把 day 之后的每一天都放进来，多报且看起来完全正常（`AC-1` 用例名里的「双端钳」就是钉这个）。非法 `day`（不合 `^\d{4}-\d{2}-\d{2}$`）按 `undefined` 处理，不抛错、也不退化成整窗。
+    - **`day` 入参与优先级**：`day` 存在时**覆盖** `windowDays`（SPEC 裁决 C，显式裁决不是实现巧合）。它**不改** TS-20 的「五档共用 `windowDays` 一个入参」契约——client 在单日模式下**仍会传 `windowDays`**（它不知道 host 的优先级规则，传了也无害），所以两者必须能并存：若改成「同时传就报错」，面板在单日下会整块空态，比「静默按 day 算」糟得多。**明细过滤必须双端钳**（`if (day !== undefined && cell.d !== day) continue;`）——只把 `windowStart` 换成 `day` 的语义是「下界」，会把 day 之后的每一天都放进来，多报且看起来完全正常（`AC-1` 用例名里的「双端钳」就是钉这个）。非法 `day`（不合 `^\d{4}-\d{2}-\d{2}$`）按 `undefined` 处理，不抛错、也不退化成整窗。
     - **`heatDaily` 恒 84 天**：固定窗口（`TOKSTATS_HEATMAP_DAYS = 84`），**不跟 `request.windowDays` 走**——否则切到「近 7 天」时热力图会缩成 7 格，失去「稳定时间轴」职责。取法是**同请求多带一次聚合**（复用同一份 `entries` 再跑一次 `tokstatsAggregate`，实测增量 **0.021 ms**）而不是独立发 RPC：宿主 `listSessions` 实测 **58–803 ms** 是单次请求里最贵的一段，而它对两个窗口**完全相同**，独立请求等于把已算好的东西再走一遍。单日模式下照常返回 84 天（**不特判**，SPEC D15：为它写分支反而增加状态机 bug 面）。
     - **`epoch.start`**：新增的纯增量字段，client 用它把热力图的折叠区截断成「不可按日拆」（`[start, end)`）。不加的话折叠区会被渲染成「无记录」——那天有量、只是被 E1 归并进区间了，那是谎报。多个会话各有不同 `start` 时取**最早**（区间端点互不重叠，取最小保证是真实区间起点）；`start` 缺失时回落成 `end` 自身（宁可把折叠区截成空区间，也不给错位起点）。
     - **`dayFolded`**：`day` 落在某会话 `[start, end)` 内时为 `true`（多会话取**或**），且**不把 epoch 合计挂到任何单日上**（区间合计不是那天的真实用量），但 epoch 端点仍要报出来（client 靠它截断热力图）。字段只在 `day` 存在时出现——旧 client 读不到它，纯增量。
     - **单日页脚必须换文案**：页脚区间右端取「今天」、`windowStart` 在单日下等于所选日，于是会写成「10/20 – 10/25」而面板里全是 10/20 的数——读者会以为面板算错了区间。单日下改为只显示那一天并标明「单日」（词典键 `foot.rangeSingle`），且**不得出现 `–` 连接**。这条是目检才发现、浅渲染拦不住的形态，已补断言。
-    - **client 侧约定**：热力图折叠格用 `.dsh-tokstats-heatFolded`，**不复用**柱图的 `.dsh-tokstats-barEpoch`——两者是不同图形元素，共用类名会让「改柱图的折叠样式」意外改到热力图（有用例断言它不得出现柱图类名）。网格必须 `grid-auto-flow:column` + `grid-template-rows:repeat(7,…)`（配 `grid-template-columns:repeat(12,…)`），否则 12 个格子会横排成「十二个周一」；DOM 顺序是「一周七天连排」，靠 `grid-auto-flow` 才转成列。**格子必须有尺寸上限**（`minmax(0,34px)` 双向钳 + `justify-content:center`）：纯 `1fr` 在整行卡片里把每格拉到约 95px，热力图变成七行巨大色块、把下面所有卡片挤出首屏（实测全宽 1600×1000 下整屏只剩热力图），封顶后的余量必须两侧均分否则图挤在左缘；图例的 `justify-content` 必须与网格一致（实测全宽下错开约 390px，读起来像两个无关元素）。三条都是「能看但读错」的形态，由样式断言钉住（含「不得退回纯 `1fr`」的反向断言）。
+    - **client 侧约定**：热力图折叠格用 `.dsh-tokstats-heatFolded`，**不复用**柱图的 `.dsh-tokstats-barEpoch`——两者是不同图形元素，共用类名会让「改柱图的折叠样式」意外改到热力图（有用例断言它不得出现柱图类名）。网格必须 `grid-auto-flow:column` + `grid-template-rows:repeat(7,…)`（配 `grid-template-columns:repeat(12,…)`），否则 12 个格子会横排成「十二个周一」；DOM 顺序是「一周七天连排」，靠 `grid-auto-flow` 才转成列。**格子必须有尺寸上限**（`minmax(0,24px)` 双向钳 + 整图 `max-width:310px` + `margin:2px auto 0` 居中）：纯 `1fr` 在整行卡片里把每格拉到约 95px，热力图变成七行巨大色块、把下面所有卡片挤出首屏（实测全宽 1600×1000 下整屏只剩热力图），封顶后的余量必须两侧均分否则图挤在左缘；图例的 `justify-content` 必须与网格一致（实测全宽下错开约 390px，读起来像两个无关元素）。三条都是「能看但读错」的形态，由样式断言钉住（含「不得退回纯 `1fr`」的反向断言）。**24px 是与日柱图并排、且间距整体收紧后的取值**（比独占整行时的 34px、上一版的 30px 都矮），它同时是可点目标的下限——格子是按钮，再小就难点。
     - **不抬 `stateVersion`、不清缓存**：与 TS-03 的反例同构——只加聚合输出字段与请求入参，**不进投影状态**。`wire.view` 键集仍必须是 `w` / `e` / `rows`，`heatDaily` / `epoch.start` / `dayFolded` **都不得**进 `state`（TS-01 / TS-28 既有断言兜底）。
-  - **日柱图的结构约定（第三批，TS-23）**：`.dsh-tokstats-chart` = 纵轴刻度列 `.dsh-tokstats-axisY`（定宽 44px、与绘图区同为 112px 高）+ `.dsh-tokstats-chartMain`（绘图区 `.dsh-tokstats-chartPlot` + 横轴 `.dsh-tokstats-axis`）。
-    - **纵轴刻度必须与绘图区同高、且不共用容器**：刻度按 `bottom:70.7%` 绝对定位，参照系是所在盒子的高度。若把横轴放进同一个盒子，刻度会以「绘图区 + 横轴」为基准而上移——柱顶刻度会漂到柱体中部。
+  - **卡片栅格（第五批：上方并排、下方自适应 + 整体收紧）**：结构分上下两段。
+    1. **顶部时间图**：`.dsh-tokstats-pairGrid`（`1fr 1fr` + `align-items:stretch`，≤820px 折单列），**日柱图在左、热力图在右**（主图优先）。两张都是图、天然等高，stretch 只是把余量交给柱图绘图区；只有一张时独占整行。
+    2. **下方卡片**：`.dsh-tokstats-columns`（`display:flex` + `align-items:flex-start`）里放两个 `.dsh-tokstats-column`（`flex:1` + `flex-direction:column` + `gap:10px`）。**每张卡保持自己的高度**，按估算高度（行数 × 46px，promptopt 用 24px）**贪心塞进较矮的那一列**，列内自上而下紧挨着排。分配顺序即阅读顺序：模型排行固定第一张（左列顶部），其余按高度补位。
+
+    **为什么不再用 grid + stretch**：栅格的行高由该行最高的卡决定，矮卡被拉高后下半张是空的——实测「上下文长度分布 6 行 vs 模型排行 16 行」时那片空白有 400+px。flex 列容器里卡片是普通块级项，高度由内容决定，空白只会留在页尾。**估算只用来决定「放进哪一列」**，不参与渲染，所以不必精确到像素；量错一两行只影响分配。
+    - **只有一张卡时独占整行**：另一列留空比独占更难看（单日模式隐藏柱图、旧 host 无 `heatDaily`、周趋势不足 2 行都会触发「少卡」）。
+    - **间距是一套值，别各写一套**：栅格 `gap:10px`、卡片内边距 `10px`、卡片头下沿 `6px`、页面左右 `20px` / 上下 `10–14px`、图表与图例的 `margin-top:2–4px`。
+    - **断点只有一处（820px）**：等宽分栏后每张卡只剩约 `(视口 − 侧栏 − 48) / 2`，低于 820px 时热力图格子会压到 18px 以下、横向刻度开始挤，并排已不划算；窄窗下列容器折成单列。断点按**视口**判定（面板宽度不等于视口，宿主侧栏可折叠），与既有 `@media` 一致，是刻意接受的近似。
+  - **色彩约定（第五批，TS-32）**：面板不再直接用宿主的 `--dsw-alias-brand-primary` 画数据，而是在 `.dsh-tokstats-page` 上定义三个变量：
+    - `--dsh-tokstats-accent` = `var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary))`。宿主的 brand 在**暗色里近白**（`neutral-bluish-50` `#f9fafb`）、**亮色里近黑**（`bluish-1000` `#0f1115`），色相为零——柱、热力图、比例条、选中态全是它，整块面板就退化成灰阶（这就是第五批要修的「难看」）。业务色是宿主自己的品牌蓝：暗色 `deepseek-400` `#7aaaff`、亮色 `deepseek-500` `#4176e6`，也是宿主 focus ring 的 fallback，借来最不容易撞车。兜底写 `, ` 回落 brand：缺 token 时退回原观感，不要变成无色。
+    - `--dsh-tokstats-on-accent` = `var(--dsw-alias-bg-layer-1)`，即「落在数据色上的文字」取**卡片底色**（挖空）：暗色下深字、亮色下白字，两套主题自动成立。**不要用 `label-primary-inverted`**——它是「与 brand 相反」的色，brand 换成蓝之后那个反色就失效（亮色下会变成白底白字）。
+    - `--dsh-tokstats-cell` = `color-mix(in srgb, var(--dsw-alias-label-primary) 5%, var(--dsw-alias-bg-layer-1))`，热力图零日格与色阶的基准底。**不能直接取 `bg-layer-2`**：亮色主题里 `bg-base` / `layer-1` / `layer-2` / `layer-3` **全是纯白**（实测 asar 两个主题块），零日格会隐形、整张热力图只剩有量的几格浮着。
+    - 五档色阶用 `color-mix(accent 26/44/62/81/100%, cell)` 而不是「同色 + opacity」：opacity 会把背后卡片底色一起透出来（暗色下第一档几乎与零日格同色），且图例无法与格子对上同一档（图例得自己再叠一层）。现在格子与图例**共用** `.dsh-tokstats-ramp` + `data-level` 一套规则，颜色必然一致。
+    - 要换色相（比如换成紫/青）只改 `--dsh-tokstats-accent` 的取值来源，其余全部跟随；三处变量都有样式断言兜住，退回 brand-primary 或改成 opacity 方案都会红。
+
+  - **日柱图的窗口跟档位走、但不短于 7 天（第五批，TS-33）**：`chartDays = days > 0 ? max(days, 7) : 0`——当日 → 7 天、近 7 天 → 7 天、本月 / 近 30 天 → 各自窗口逐日、全部 → 全历史（超 30 列按整日合并）。7 天是**下限**：更短的窗口画不出形状（一根柱），更长的窗口不该被砍成 7 天（锁死 7 天那一版让「近 30 天 / 本月」看不到逐日走势，是本次补上的真缺口）。实现三件事：① **数据源按窗口分情况**：窗口 ≥ 7 天用 `daily`（当前窗口的逐日真源）；窗口 < 7 天（当日档）`daily` 只有一行，借与档位无关的 `heatDaily`（host 固定 84 天、已按 workspace 过滤）取最近 7 天；旧 host 没有 `heatDaily` 时退回 `daily`（退化成一根柱，但不整卡消失）。② **窗口起点与列算法同源**：都用 `generatedAt` 的本地日算 `today - (chartDays - 1)`，不能借热力图那个「真实今天」——差一天就与列计算错位。③ **窗口口径写在卡头**（`TokstatsCard` 的 `note`：`近 N 天 · 峰值 …` / `全部 · 峰值 …`）——「图比档位长」只剩当日档一处，不标出来读者会以为图少画了。推论：列数由窗口决定，列密时（>12 列）不标柱顶峰值（见下条）。
+  - **日柱图的结构约定（第三批起；第五批改为两行 grid，TS-23）**：`.dsh-tokstats-chart` 是 `display:grid`，`grid-template-columns:auto minmax(0,1fr)` × `grid-template-rows:minmax(0,1fr) auto`：第 1 行 = 纵轴刻度列 `.dsh-tokstats-axisY`（`grid-area:1/1`，宽 40px）+ 绘图区 `.dsh-tokstats-chartMain`（`grid-area:1/2`，内含 `.dsh-tokstats-chartPlot`），第 2 行 = 横轴 `.dsh-tokstats-axis`（**必须写 `grid-area:2/2`**）。
+    - **纵轴刻度必须与绘图区同高、且不共用容器**：刻度按 `bottom:70.7%` 绝对定位，参照系是所在盒子的高度。用 flex 布局时纵轴只能写死高度（`height:112px` 与绘图区互相抄一个数字），卡片一被拉伸（与热力图并排后两卡等高）0 刻度就浮在柱体中部；grid 的行定义让「纵轴只跨绘图区那一行、高度由行决定」成为结构事实，`height:auto` 即可。
+    - **横轴必须显式落位**：不写 `grid-area` 时自动排进第 2 行第 1 列（纵轴那列），`auto` 列宽会被 7 个刻度槽撑到 300+px——绘图区被整体推右、日期标签挤成一团、柱与刻度彻底错位。这一条只有目检（截图）能发现，浅渲染拦不住，已补样式断言。
+    - **横轴与柱位共用一条轨道**：柱容器 `.dsh-tokstats-bars` 与横轴 `.dsh-tokstats-axis` 共用 `.dsh-tokstats-track`（`gap` + `justify-content:center`），每个柱位与每个刻度槽共用 `.dsh-tokstats-trackItem`（`flex:1` + `min-width:3px` + `max-width:48px`）。同一套约束作用于同一列数，第 i 个槽必然落在第 i 根柱的正下方；每列都渲染槽（只有首/中/末三处写字），空槽是撑出列宽的那一层。**不得让横轴自己写 `justify-content`**：曾经的 `space-between` 把首末标签钉在容器两端，而柱组在少列时是居中的，两者相差可达半个容器宽。
     - **刻度位置按平方根刻度算**：峰值在 `100%`、`峰值÷2` 在 `sqrt(0.5)=70.7%`、`0` 在 `0%`。等距三档（100/50/0）会让读者按线性读，而柱高是 `sqrt(calls/peak)`——两者对不上就是「轴在撒谎」。网格线 `.dsh-tokstats-gridLine` 与刻度共用同一组 bottom 值，**改一处必须改两处**。
-    - **柱宽上限 48px 必须配 `justify-content`**：`flex:1` 触顶后剩余空间不再分给柱体，容器不显式决定（`center`）就全部落在右侧，少列时看起来像图没画完。60 列时每列约 13–20px（实测「全部」档 58 列 / 18px），上限对密排无影响。
-    - **峰值柱顶标数值，其余柱只留 tooltip**：峰值标签 `.dsh-tokstats-barPeak` 绝对定位在柱顶上方（`bottom:calc(100% + 2px)`），不改变柱高。并列峰值只标第一根（`peakDayKey`），否则同屏出现两个同值标签。
-    - **窄窗（≤900px）隐藏中间刻度**：三行标签在 44px 轴列里会互相挤压，留首末两个仍能读出量级。
-    - **KPI 副值必须是对主值的拆分（TS-17）**：调用次数 = 日均；输入 = 未缓存 / 缓存读；输出 = **占输入的比例**（`tokstatsPct`，分母为 0 时破折号，不编 0%）；命中率 = **分子 / 分母**（`命中 X / 计费输入 Y`）。判据是「四卡副值两两不等」断言——只要有一条复述别的卡，它就红。
+    - **柱宽上限 48px 必须配 `justify-content`**：`flex:1` 触顶后剩余空间不再分给柱体，容器不显式决定（`center`）就全部落在右侧，少列时看起来像图没画完。列数由窗口决定（TS-33）：当日 / 近 7 天 7 列（每列约 40px），近 30 天 / 本月最多 30 列（每列约 8–10px，`TOKSTATS_DAILY_COLUMNS = 30` 是合并上限）。
+    - **峰值柱顶标数值，其余柱只留 tooltip**：峰值标签 `.dsh-tokstats-barPeak` 绝对定位在**柱体内部顶端**（`top:2px` + 反色文字），并给 `z-index:2`——放在柱顶上方（`bottom:calc(100%+2px)`）时因为峰值柱恒为 100% 高，标签必然溢出绘图区、与卡片标题行撞在一起。**列数 > 12 时不标**（`TOKSTATS_PEAK_LABEL_MAX_COLUMNS`）：30 列时每列只剩 8–10px，标签（约 24px）会被相邻柱压成半个数字，读出来是「5」；峰值数值在卡头「峰值 …」里始终可读。并列峰值只标第一根（`peakDayKey`），否则同屏出现两个同值标签。
+    - **窄窗（≤900px）隐藏中间刻度**：三行标签在 40px 轴列里会互相挤压，留首末两个仍能读出量级。
+    - **KPI 副值必须是对主值的拆分（TS-17）**：调用次数 = **日均**（多天窗口）/ **占 84 天份额**（单天窗口，日均会等于主值本身）/ **全部历史**（「全部」档）；输入 = 未缓存 / 缓存读；输出 = **占输入的比例**（`tokstatsPct`，分母为 0 时破折号，不编 0%）；命中率 = **分子 / 分母**（`命中 X / 计费输入 Y`）。判据是「四卡副值两两不等」断言——只要有一条复述别的卡，它就红。
+    - **四卡的口径跟随档位（TS-30）**：四张卡与下方图表**同一个窗口**，都取 `totals`（host 已按窗口 + 工作区过滤）。缺省档位是「当日」，所以打开面板第一眼就是今天的数；切到「近 30 天」四卡同步变成 30 天合计。**不要**再引入第二套「当日」取值——两套口径并存时，图表上方挂着的永远是「另一天的数」，读者得自己记住哪块是哪个口径。当日档下顺带隐藏周趋势卡（窗口只有一天，周合计恒等于 `totals`）：这属于「复述主值」，与单日模式同一条理由。
     - 词典新增 10 个键（`foot.coverage` / `foot.skipped` / `tip.coverage` / `tip.coverageSkipped` / `tip.dayEpoch` 各 `.one`/`.other`）。**占位符名必须与 `tCount` 注入的一致**：`tCount` 只注入 `{count}`，模板里写 `{sessions}` 会原样显示花括号（本批真实踩到，已加「不得残留未替换占位符」断言）。第三批另加 `tip.dailyScale`（刻度口径说明）并改写 `kpi.outputHint` / `kpi.hitHint`。
     - **代表日由 client 也算一遍 `end - 1`**：与 host 的 `tokstatsDayBefore` 是同一条式子的两份实现（两个模块图没有共享常量）。改任一边都要改另一边，否则打标会落到错误的列上——host 侧有「end 与读取期代表日同口径」用例钉住自己的那半。
     - **判据是「代表日落在列区间内」而不是 `=== startDay`**：长窗口下列会被合并（跨度 > 1 天），只比首日在「全部 / 近 30 天」档必然漏标。

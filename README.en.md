@@ -50,22 +50,22 @@ The official ContextMeter already shows how long the context is. What it does no
 
 How many tokens were spent, and who spent them?
 
-![tokstats panel](./docs/assets/tokstats-en.png)
+![tokstats panel (sample data)](./docs/assets/tokstats-en.png)
 
 "Token usage stats" in the sidebar opens a full panel:
 
 | Block | What it answers |
 | --- | --- |
-| **Four metric cards** | How much did this window use? How much did caching save? |
-| **Daily calls** | Which day was heavy? Where is the peak? |
+| **Four metric cards** | How much did the **selected window** use? How much did caching save? (Follows the window switcher) |
+| **Daily calls** | Which of these days was heavy? (Window follows the switcher, never shorter than 7 days — the card header prints the actual span; beyond 30 columns days are merged; sits next to the heatmap with date ticks aligned to each bar) |
 | **Last 12 weeks** | Which days were active, which were idle? Click a day to see just that day |
 | **Context length distribution** | How long are my requests? How much sits in long ones? Billed input binned into six tiers: `[0,8K)` / `[8K,32K)` / `[32K,128K)` / `[128K,256K)` / `[256K,512K)` / `[512K,∞)` |
-| **Trend (weekly)** | Is this week heavier than last? Weekly totals always add up to the grand total, so they cannot disagree |
+| **Trend (weekly)** | Is this week heavier than last? One bar per week; the current week is dimmed and marked "in progress"; weekly totals always add up to the grand total |
 | **Models** | Which model carries the usage? Counted by `provider/model`; samples with no route land in "Unattributed" placed last, so the rows add up to the total |
 | **Workspaces** | Which project carries the usage? A picker switches to a single workspace; subagent usage merges into the root workspace |
 | **Prompt restructure usage** | Is promptopt actually used? Started / adopted / dismissed counts and adoption rate |
 
-Four windows: last 7 days / this month / last 30 days / all time, last 7 days by default. Data is fetched when the panel opens, when you switch window or workspace, and when you hit refresh.
+Five windows: **today** / last 7 days / this month / last 30 days / all time, today by default — the window drives the four metric cards plus the distribution, ranking and weekly blocks. The heatmap always covers the last 12 weeks regardless of the switcher; the daily bar chart follows the switcher but is never shorter than 7 days (the today window still draws 7 bars, and beyond 30 columns days are merged), with the actual span printed in its card header. Data is fetched when the panel opens, when you switch window or workspace, and when you hit refresh.
 
 ## promptopt: tidy up a spoken draft
 
