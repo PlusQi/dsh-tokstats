@@ -1444,3 +1444,397 @@ test("TS-17 / TS-23：词典新增键 zh/en 成对、无 provider / model 两词
 		assert.ok(!/\d/.test(zh[key]), `zh ${key} 不得含数字记号（K/M 与刻度值不进词典）`);
 	}
 });
+
+// ── 第四批：热力图（TS-28；AC-6…AC-9 / AC-11 / AC-12）──────────────────────
+//
+// 这一组的失败模式是「图能看但读错」或「静默谎报」：
+// - 网格方向搞反（12 个周一横排一行）时，图依然漂亮，只是「列 = 自然周」不成立；
+// - 色阶写成线性时，低量日全挤进最浅档，五档退化成三档；
+// - 折叠区被渲染成「无记录」是**谎报**——那天有量，只是被 E1 归并进区间了；
+// - 未来日期渲染成零格会让读者以为「今天之后都没用量」。
+
+/** 日键 → 面板上显示的 M/D 标签（与 client 的 tokstatsDayLabel 同口径）。 */
+function tokstatsLabel(day) {
+	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+	if (m === null) return day;
+	return String(Number(m[2])) + "/" + String(Number(m[3]));
+}
+
+/** 一个日键相对**真实今天**的偏移（热力图窗口跟真实 today 走，写死日期会漂移）。 */
+function dayOffset(offsetDays, fromMs = Date.now()) {
+	const d = new Date(fromMs);
+	d.setHours(12, 0, 0, 0);
+	d.setDate(d.getDate() + offsetDays);
+	const pad = (v) => String(v).padStart(2, "0");
+	return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+
+/** 热力图网格容器节点（`role="grid"`）。 */
+function heatGridOf(tree) {
+	return nodesOf(tree).find((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-heat(?:\s|$)/.test(n.props.className));
+}
+
+/** 网格里的格子节点（不含未来日期的空占位）。 */
+function heatCellsOf(tree) {
+	const grid = heatGridOf(tree);
+	if (grid === undefined) return [];
+	return (grid.children ?? []).filter((n) => n !== null && typeof n === "object"
+		&& typeof n.props?.className === "string" && n.props.className.includes("dsh-tokstats-heatCell"));
+}
+
+/** 只取「真实日期格」（排除 heatCellEmpty 占位）。 */
+function heatRealCellsOf(tree) {
+	return heatCellsOf(tree).filter((n) => !n.props.className.includes("dsh-tokstats-heatCellEmpty"));
+}
+
+/** 造一份 84 天 heatDaily：`entries` 是 `{ offset, calls }`（offset 相对今天）。 */
+function makeHeatDaily(entries) {
+	return entries.map(({ offset, calls }) => ({
+		day: dayOffset(offset), calls, in: 1000, cr: 0, cw: 0, out: 10,
+	}));
+}
+
+test("AC-6：热力图渲染 12 列 × 7 行，周一在最上（第一行第一格是周一）", async () => {
+	const rpc = makeRpcStub();
+	// 造满 84 天、每天 1 次：这样没有任何未来空格干扰行列计数。
+	const heatDaily = [];
+	for (let i = 83; i >= 0; i -= 1) heatDaily.push({ day: dayOffset(-i), calls: 1, in: 10, cr: 0, cw: 0, out: 1 });
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const grid = heatGridOf(tree);
+	assert.ok(grid, "热力图网格容器应存在（role=grid）");
+	assert.equal(grid.props.role, "grid", "整图 role=grid（TS-28 可访问性）");
+	const cells = heatRealCellsOf(tree);
+	// 84 格 = 12 列 × 7 行。**格子数必须恰为 84**：多一格说明窗口没锁死 84 天，
+	// 少一格说明末列被错误裁掉（今天所在的周还没过完，但过去的格子都在）。
+	assert.equal(cells.length, 84, `应恰有 84 个日期格，实际 ${cells.length}`);
+	// 第一格必须是**周一**：DOM 顺序按「一周七天连排」，配合 grid-auto-flow:column
+	// 才是「列 = 自然周」。若第一格是别的星期几，说明列的起点没按自然周对齐。
+	const firstDay = cells[0].props.title;
+	assert.ok(firstDay !== undefined, "第一格应有 tooltip（含日期）");
+	// 从日期反推星期几：用 Date 的 UTC 解析（与 client 的日键算术同口径）。
+	const firstDateKey = /^(\d+)\/(\d+)：/.exec(String(firstDay));
+	assert.ok(firstDateKey !== null, `第一格 tooltip 应形如「M/D：…」，实际 ${firstDay}`);
+	// 更强也更稳的判据：DOM 里第 i 格与第 i+7 格相差 7 天（同列上下相邻 = 同一周内）。
+	// 这条同时钉住「列 = 自然周」与「行 = 周内第几天」两件事。
+	const days = cells.map((n) => String(n.props.title).replace(/：.*$/, ""));
+	const parsed = days.map((label) => {
+		const m = /^(\d+)\/(\d+)$/.exec(label);
+		return m === null ? null : { month: Number(m[1]), day: Number(m[2]) };
+	});
+	assert.ok(parsed.every((p) => p !== null), "每格 tooltip 都应带 M/D 日期");
+	// 第 0 格与第 1 格必须是**相邻两天**（同一周内往下走）。
+	const stepOne = (a, b) => {
+		if (a === null || b === null) return false;
+		// 跨月时只比较「日」的连续性会误判，故用 Date 构造（年份取当前年）。
+		const y = new Date().getFullYear();
+		const msA = Date.UTC(y, a.month - 1, a.day);
+		const msB = Date.UTC(y, b.month - 1, b.day);
+		return Math.round((msB - msA) / 86400000) === 1;
+	};
+	assert.ok(stepOne(parsed[0], parsed[1]), `第 0/1 格应相邻一天（行内往下走），实际 ${days[0]} → ${days[1]}`);
+	// 第 6 格（第一列最后一行 = 周日）与第 7 格（第二列第一行 = 下一周周一）也相邻一天。
+	assert.ok(stepOne(parsed[6], parsed[7]), `第 6/7 格应相邻一天（跨列到下一周），实际 ${days[6]} → ${days[7]}`);
+	// 第一格是周一：用 Date 算 getUTCDay，0 = 周日、1 = 周一。
+	const firstParsed = parsed[0];
+	const firstMs = Date.UTC(new Date().getFullYear(), firstParsed.month - 1, firstParsed.day);
+	assert.equal(new Date(firstMs).getUTCDay(), 1, `第一格必须是周一，实际 ${days[0]}（UTC day=${new Date(firstMs).getUTCDay()}）`);
+});
+
+test("AC-6：末列未过完的周渲染成空占位，不是零格", async () => {
+	const rpc = makeRpcStub();
+	// 只造到今天：今天之后的天必须留空（渲染成零格会被读成「那天没用量」）。
+	const heatDaily = [];
+	for (let i = 83; i >= 0; i -= 1) heatDaily.push({ day: dayOffset(-i), calls: 1, in: 10, cr: 0, cw: 0, out: 1 });
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const all = heatCellsOf(tree);
+	const placeholders = all.filter((n) => n.props.className.includes("dsh-tokstats-heatCellEmpty"));
+	// 今天可能是周日（末列刚好满）——那时占位为 0 也是正确行为。
+	// 判据是「占位数 = 6 − 今天在周内的位置」，不能写死一个数字。
+	const todayDow = (new Date().getDay() + 6) % 7; // 0 = 周一
+	assert.equal(placeholders.length, 6 - todayDow,
+		`末列应留 ${6 - todayDow} 个空占位（今天周内位置 ${todayDow}），实际 ${placeholders.length}`);
+	// 占位必须是不可交互的（不是可点的零日格）。
+	for (const node of placeholders) {
+		assert.equal(node.props["aria-hidden"], "true", "未来日期占位应对辅助技术隐藏");
+		assert.equal(node.props.disabled, undefined, "占位不是按钮，不该有 disabled 属性");
+	}
+	// 占位总数 + 真实格 = 84（网格尺寸恒定）。
+	assert.equal(all.length, 84, "占位与真实格合计恒为 84");
+});
+
+test("AC-7：色阶按 sqrt(calls/peak) 分五档（按值断言，不按「包含某档」）", async () => {
+	// SPEC AC-7 的原始判据：peak=2430 时 calls=34 落最低档（sqrt(34/2430)≈0.118
+	// → 20% 档）；calls=2430 落 100% 档。
+	// **必须按值断言**：写成「至少有一个 level=1」在色阶算错时仍会绿。
+	const rpc = makeRpcStub();
+	const heatDaily = makeHeatDaily([
+		{ offset: -1, calls: 2430 },  // 峰值 → 5
+		{ offset: -2, calls: 34 },    // sqrt(34/2430)=0.118 → 1
+		{ offset: -3, calls: 132 },   // sqrt(132/2430)=0.233 → 2
+		{ offset: -4, calls: 1082 },  // sqrt(1082/2430)=0.667 → 4
+		{ offset: -5, calls: 228 },   // sqrt(228/2430)=0.306 → 2
+	]);
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const cells = heatRealCellsOf(tree);
+	const levelOf = (offset) => {
+		const day = dayOffset(offset);
+		const label = tokstatsLabel(day);
+		const cell = cells.find((n) => String(n.props.title).startsWith(label + "："));
+		return cell?.props["data-level"];
+	};
+	// 逐值断言（含边界档位）：这四档把 0.2/0.4/0.6/0.8 四条边界中的三条覆盖了。
+	assert.equal(levelOf(-1), "5", "峰值落 100% 档");
+	assert.equal(levelOf(-2), "1", "sqrt(34/2430)≈0.118 落 20% 档（最低档）");
+	assert.equal(levelOf(-3), "2", "sqrt(132/2430)≈0.233 落 40% 档");
+	assert.equal(levelOf(-5), "2", "sqrt(228/2430)≈0.306 落 40% 档");
+	assert.equal(levelOf(-4), "4", "sqrt(1082/2430)≈0.667 落 80% 档");
+});
+
+test("AC-8：零日不渲染填充（无 data-level），tooltip 写「无记录」", async () => {
+	const rpc = makeRpcStub();
+	// 只有两天有量，其余 82 天零调用（本机真实形态：84 天里 73 天为零）。
+	const heatDaily = makeHeatDaily([{ offset: -1, calls: 5 }, { offset: -2, calls: 3 }]);
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const cells = heatRealCellsOf(tree);
+	const zeroCells = cells.filter((n) => String(n.props.title).includes("无记录"));
+	assert.ok(zeroCells.length > 70, `零日应有 70+ 个，实际 ${zeroCells.length}`);
+	for (const cell of zeroCells) {
+		// 零日**不设 data-level**（CSS 落到默认背景色）：画最浅实心格会让
+		// 「没用量」与「用量很少」视觉上几乎无差（SPEC D9）。
+		assert.equal(cell.props["data-level"], undefined, `零日不得设 data-level，实际 ${cell.props.title}`);
+		// 零日不可点（点进去只有全零面板，是噪音，SPEC D10）。
+		assert.equal(cell.props.disabled, true, "零日不可点");
+	}
+	// 有量的格子必须有 data-level（1–5），否则它会被当成零日。
+	const liveCells = cells.filter((n) => !String(n.props.title).includes("无记录"));
+	assert.equal(liveCells.length, 2, `应有 2 个有量格，实际 ${liveCells.length}`);
+	for (const cell of liveCells) {
+		assert.match(String(cell.props["data-level"]), /^[1-5]$/, "有量格必须有 1–5 档");
+		assert.equal(cell.props.disabled, false, "有量且未折叠的格子可点（SPEC D10）");
+	}
+});
+
+test("AC-9：折叠区格子渲染为「不可按日拆」，且**不含「无记录」文案**（防谎报）", async () => {
+	// 这条是本变更最重要的反向断言（TASKS hm2-3c）：折叠区的天在 heatDaily 里
+	// **不出现**（裁决 D），若 client 只按「数组里没有」判成零，就会把那些天渲染成
+	// 「无记录」——而那天其实有量，只是被 E1 归并进区间了。那是谎报。
+	const rpc = makeRpcStub();
+	const heatDaily = makeHeatDaily([{ offset: -60, calls: 5 }, { offset: -61, calls: 3 }]);
+	// epoch 覆盖 [-40, -20)：这 20 天在 heatDaily 里没有逐日明细。
+	const epoch = { start: dayOffset(-40), end: dayOffset(-20), calls: 999 };
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, epoch, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const cells = heatRealCellsOf(tree);
+	const folded = cells.filter((n) => n.props.className.includes("dsh-tokstats-heatFolded"));
+	assert.equal(folded.length, 20, `[start, end) 半开区间应恰好 20 格，实际 ${folded.length}`);
+	for (const cell of folded) {
+		// ① 专用类名（**不复用** .dsh-tokstats-barEpoch：两者是不同图形元素）。
+		assert.ok(!cell.props.className.includes("dsh-tokstats-barEpoch"), "热力图折叠格不得复用柱图的类名");
+		// ② tooltip 写明「已折叠」与区间端点。
+		assert.match(String(cell.props.title), /已折叠/, "折叠格 tooltip 应写明已折叠");
+		assert.match(String(cell.props.title), /不可按日拆分/, "折叠格 tooltip 应说明不可按日拆");
+		// ③ **不得出现「无记录」**——这是谎报的直接形态。
+		assert.ok(!String(cell.props.title).includes("无记录"), `折叠格不得写成「无记录」，实际 ${cell.props.title}`);
+		assert.ok(!String(cell.props["aria-label"]).includes("无记录"), "aria 也不得写「无记录」");
+		// ④ 折叠格不可点（点进去会显示偏低的数，SPEC D10）。
+		assert.equal(cell.props.disabled, true, "折叠格不可点");
+		// ⑤ 折叠格不参与色阶（它的 calls 是派生值，上色会被读成「那天真用了这么多」）。
+		assert.equal(cell.props["data-level"], undefined, "折叠格不得设 data-level");
+		assert.equal(cell.props["data-folded"], "1", "折叠格带 data-folded 标记");
+	}
+	// 反向：非折叠格的 tooltip 里不得出现「折叠」字样（否则标记会溢出到全图）。
+	for (const cell of cells) {
+		if (folded.includes(cell)) continue;
+		assert.ok(!String(cell.props.title).includes("已折叠"), `非折叠格不得提折叠，实际 ${cell.props.title}`);
+	}
+});
+
+test("AC-9：epoch 为 null 时不出现任何折叠格（反向断言）", async () => {
+	const rpc = makeRpcStub();
+	const heatDaily = makeHeatDaily([{ offset: -1, calls: 5 }, { offset: -2, calls: 3 }]);
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, epoch: null, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const cells = heatRealCellsOf(tree);
+	assert.equal(cells.filter((n) => n.props.className.includes("heatFolded")).length, 0, "无 epoch 时不得有折叠格");
+	for (const cell of cells) {
+		assert.ok(!String(cell.props.title).includes("已折叠"), "无 epoch 时 tooltip 不得提折叠");
+	}
+});
+
+test("TS-28：旧 host 无 heatDaily 时热力图整块不渲染、不抛错（硬规则 6）", async () => {
+	const rpc = makeRpcStub();
+	// 旧 host 的返回值：没有 heatDaily 字段。
+	const legacy = makeSummary();
+	delete legacy.heatDaily;
+	rpc.respond(() => ({ ok: true, value: legacy }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	assert.equal(heatGridOf(tree), undefined, "无 heatDaily 时不得渲染热力图（不得用 daily 顶上）");
+	// 面板其余部分照常（不能因为热力图缺席就整块空态）。
+	assert.ok(nodesOf(tree).some((n) => typeof n.props.className === "string"
+		&& n.props.className === "dsh-tokstats-kpiHint"), "其余卡片应照常渲染");
+	// 也不得因此落进「暂无数据」。
+	assert.ok(!textOf(tree).includes("暂无数据"), "有 daily/weekly 时不该显示暂无数据");
+});
+
+test("TS-28：heatDaily 为空数组时同样不渲染热力图卡", async () => {
+	const rpc = makeRpcStub();
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily: [], generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	assert.equal(heatGridOf(tree), undefined, "空 heatDaily 不渲染热力图");
+});
+
+test("AC-11：键盘导航——←/→ 跨日、↑/↓ 跨周、Enter/Space 选中、Esc 退出", async () => {
+	// SPEC 裁决 B 的键位。断言走 aria-selected / data-cursor 的**变化**，
+	// 不试图断言真实 DOM 焦点（浅渲染没有 DOM）。
+	const rpc = makeRpcStub();
+	const heatDaily = [];
+	for (let i = 83; i >= 0; i -= 1) heatDaily.push({ day: dayOffset(-i), calls: 1, in: 10, cr: 0, cw: 0, out: 1 });
+	rpc.respond(() => ({ ok: true, value: makeSummary({ heatDaily, generatedAt: Date.now() }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const grid = heatGridOf(tree);
+	assert.ok(grid, "热力图应存在");
+	assert.equal(typeof grid.props.onKeyDown, "function", "网格应挂 onKeyDown（键盘可达）");
+	// 先给一格焦点（组件用 onFocus 记 cursorDay）。
+	const cells = heatRealCellsOf(tree);
+	const startCell = cells[20];
+	assert.equal(typeof startCell.props.onFocus, "function", "格子应有 onFocus（记键盘光标）");
+	startCell.props.onFocus();
+	/** 重新渲染并取光标格（返回 { cell, index }，index 是它在网格 DOM 里的位置）。 */
+	const cursorAfter = (props) => {
+		react.reset();
+		const t2 = props();
+		const all = heatCellsOf(t2);
+		const idx = all.findIndex((n) => n.props["data-cursor"] === "1");
+		return { tree: t2, grid: heatGridOf(t2), cell: idx < 0 ? undefined : all[idx], index: idx, all };
+	};
+	// 基准：焦点格的索引。
+	const base = cursorAfter(() => main.comp({ t }));
+	assert.ok(base.cell, "焦点后应有光标格");
+	const baseIndex = base.index;
+	// ArrowRight：光标前进**一格**（跨日）。
+	base.grid.props.onKeyDown({ key: "ArrowRight", preventDefault: () => {} });
+	const right = cursorAfter(() => main.comp({ t }));
+	assert.equal(right.index, baseIndex + 1, "ArrowRight 应前进一格（跨日）");
+	// ArrowDown：光标前进**七格**（跨周，SPEC 裁决 B 的 ↑/↓ 跨周）。
+	right.grid.props.onKeyDown({ key: "ArrowDown", preventDefault: () => {} });
+	const down = cursorAfter(() => main.comp({ t }));
+	assert.equal(down.index, right.index + 7, "ArrowDown 应前进七格（跨周）");
+	// ArrowUp：退回七格。
+	down.grid.props.onKeyDown({ key: "ArrowUp", preventDefault: () => {} });
+	const up = cursorAfter(() => main.comp({ t }));
+	assert.equal(up.index, down.index - 7, "ArrowUp 应后退七格（跨周）");
+	// ArrowLeft：退一格。
+	up.grid.props.onKeyDown({ key: "ArrowLeft", preventDefault: () => {} });
+	const left = cursorAfter(() => main.comp({ t }));
+	assert.equal(left.index, up.index - 1, "ArrowLeft 应后退一格（跨日）");
+	// 方向键必须 preventDefault（否则页面会跟着滚动）。
+	let prevented = 0;
+	left.grid.props.onKeyDown({ key: "ArrowRight", preventDefault: () => { prevented += 1; } });
+	assert.equal(prevented, 1, "方向键应 preventDefault（避免页面滚动）");
+	// Enter 选中 → 进单日模式：四档置灰 + 面包屑出现。
+	const cur = cursorAfter(() => main.comp({ t }));
+	cur.grid.props.onKeyDown({ key: "Enter", preventDefault: () => {} });
+	react.reset();
+	react.runEffects();
+	for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+	react.reset();
+	const single = renderDeep(react, main.comp({ t }));
+	const switches = nodesOf(single).filter((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
+	assert.ok(switches.length > 0, "应有四档按钮");
+	assert.ok(switches.every((n) => n.props.disabled === true), "单日模式下四档全部置灰");
+	// Esc 退出：四档恢复可用。
+	const grid4 = heatGridOf(single);
+	grid4.props.onKeyDown({ key: "Escape", preventDefault: () => {} });
+	react.reset();
+	react.runEffects();
+	for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+	react.reset();
+	const back = renderDeep(react, main.comp({ t }));
+	const switchesBack = nodesOf(back).filter((n) => typeof n.props.className === "string"
+		&& /(?:^|\s)dsh-tokstats-switch(?:\s|$)/.test(n.props.className));
+	assert.ok(switchesBack.every((n) => n.props.disabled !== true), "Esc 退出后四档恢复可用");
+});
+
+test("AC-12：热力图词典键 zh/en 成对、整句模板、无残留占位符", () => {
+	const { dicts } = setupClient();
+	assertDictPair(assert, NS, dicts);
+	const zh = dicts[NS].zh;
+	const en = dicts[NS].en;
+	const added = [
+		"section.heat", "heat.less", "heat.more",
+		"heat.cellAria.one", "heat.cellAria.other",
+		"heat.cellTip.one", "heat.cellTip.other",
+		"heat.empty", "heat.folded", "heat.foldedAria", "heat.keyHint",
+		"crumb.exit", "crumb.aria", "kpi.callsHintShare", "single.folded",
+	];
+	for (const key of added) {
+		assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `zh 缺键 ${key}`);
+		assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en 缺键 ${key}`);
+		assert.ok(!/\bprovider\b/i.test(zh[key]), `zh ${key} 不得出现 provider`);
+		assert.ok(!/\bmodel\b/i.test(zh[key]), `zh ${key} 不得出现 model`);
+	}
+	// 整句模板：占位符必须是**渲染时真的会注入**的那些名字。
+	// `tCount` 只注入 `{count}`，模板里写别的名字会原样显示花括号（本仓库踩过）。
+	assert.ok(zh["heat.cellTip.other"].includes("{count}"), "计数句必须带 {count}");
+	assert.ok(zh["heat.cellTip.other"].includes("{input}") && zh["heat.cellTip.other"].includes("{output}"));
+	assert.ok(zh["heat.folded"].includes("{start}") && zh["heat.folded"].includes("{end}"), "折叠句带区间端点");
+	assert.ok(zh["kpi.callsHintShare"].includes("{pct}"), "份额副值是整句模板");
+	assert.ok(en["kpi.callsHintShare"].includes("{pct}"));
+	// 三种态的文案必须**互斥**（AC-8 / AC-9 的语义基础）。
+	assert.ok(!zh["heat.empty"].includes("折叠"), "「无记录」文案不得提折叠");
+	assert.ok(!zh["heat.folded"].includes("无记录"), "「已折叠」文案不得提无记录");
+});
+
+test("样式：热力图折叠格用斜纹 + 主题变量，且不复用柱图折叠类名（TS-28）", () => {
+	injectedStyleTags.length = 0;
+	setupClient();
+	const tag = injectedStyleTags.find((t) => t.dataset.pluginCss === "dsh-tokstats/tokstats");
+	assert.ok(tag, "tokstats 样式 tag 应已注入");
+	// 折叠样式规则存在，且用斜纹 + 主题变量（不写死颜色）。
+	assert.match(tag.textContent, /\.dsh-tokstats-heatFolded/, "热力图折叠格样式应存在");
+	const rule = tag.textContent.match(/\.dsh-tokstats-heatFolded\{([^}]*)\}/);
+	assert.ok(rule !== null, "应能取出热力图折叠格规则");
+	assert.match(rule[1], /repeating-linear-gradient/, "折叠态沿用 TS-22 的斜纹语义");
+	assert.match(rule[1], /var\(--dsw-alias-/, "颜色必须走主题变量");
+	assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(rule[1]), "不得写死十六进制颜色");
+	// **类名必须与柱图的折叠类名分开**：共用会让「改柱图的折叠样式」意外改到热力图。
+	assert.ok(!/\.dsh-tokstats-heatFolded[^{]*\{[^}]*\.dsh-tokstats-barEpoch/.test(tag.textContent),
+		"热力图折叠样式不得引用柱图折叠类名");
+	// 五档色阶必须全是品牌色 + 透明度，不得出现五个不同主题色（SPEC D8）。
+	const levels = [1, 2, 3, 4, 5].map((lv) => {
+		const marker = '.dsh-tokstats-heatCell[data-level="' + lv + '"]{';
+		const at = tag.textContent.indexOf(marker);
+		if (at < 0) return null;
+		const from = at + marker.length;
+		const to = tag.textContent.indexOf("}", from);
+		return to < 0 ? null : tag.textContent.slice(from, to);
+	});
+	assert.ok(levels.every((v) => v !== null), "五档色阶规则都应存在");
+	for (const body of levels) {
+		assert.match(body, /background:var\(--dsw-alias-brand-primary\)/, "五档都必须用同一个品牌色");
+		assert.match(body, /opacity:/, "档位靠透明度区分");
+		assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(body), "不得写死十六进制颜色");
+	}
+	// 网格必须按列填（grid-auto-flow:column）+ 固定 7 行：否则 12 个格子会横排
+	// 成一行，列不再是自然周。
+	const gridRule = tag.textContent.match(/\.dsh-tokstats-heat\{([^}]*)\}/);
+	assert.ok(gridRule !== null, "网格规则应存在");
+	assert.match(gridRule[1], /grid-auto-flow:column/, "必须按列填充（DOM 顺序是一周七天连排）");
+	assert.match(gridRule[1], /grid-template-rows:repeat\(7,1fr\)/, "固定 7 行（周一在最上）");
+	assert.match(gridRule[1], /grid-template-columns:repeat\(12,1fr\)/, "12 列 = 12 周");
+});
