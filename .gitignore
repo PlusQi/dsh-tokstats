@@ -34,6 +34,19 @@ docs/specs/
 docs/debug/
 docs/project-engineering-guardrails-guide.zh-CN.md
 
+# ── AI 客户端私有目录 ──
+# 各 AI 客户端（WorkBuddy / Claude Code / Codex / Trae / Cursor …）都会在本机留下
+# 自己的目录：记忆、工具、一次性脚本、截图。它们一律**不入库**，理由有两条：
+#   1. 里头是机器事实与个人笔记，换人不该继承（同 docs/specs 的判据）；
+#   2. 更要紧的是**`.git/info/exclude` 不随仓库分发**——别的维护者 / 别的 AI agent
+#      重新 clone 之后看不到那条规则，`.workbuddy/` 会变成未跟踪文件出现在
+#      `git status` 里，很容易被 `git add -A` 一带就提交上去。所以这条必须写在
+#      这里（按 AGENTS.md「忽略规则分层」：换一台机器后还该不该生效？该 → 写这里）。
+# 目前只列 `.workbuddy/`（本仓库确有这个客户端在用）。其余客户端目录若哪天需要
+# 随仓库分发（例如团队共享的 slash command），应在本文件里**精确放行**那几个文件，
+# 而不是整目录放开。
+.workbuddy/
+
 # ── 本机叠加约束 ──
 # 宿主 dsh-agent-instructions 支持 AGENTS.local.md / CLAUDE.local.md 作为叠加层
 # （排在项目 AGENTS.md 之后注入）。本文件承载只对本机成立的约束：本机路径与端口、
