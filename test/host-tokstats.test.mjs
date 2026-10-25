@@ -31,6 +31,7 @@ import {
 	TOKSTATS_BUCKET_COUNT,
 	TOKSTATS_CHANNEL,
 	TOKSTATS_ENDPOINT,
+	TOKSTATS_HEATMAP_DAYS,
 	tokstatsRouteOf,
 } from "../lib/index.js";
 
@@ -1919,6 +1920,246 @@ test("TS-26：持久化水位读不出来时按未记账处理（保守重读，
 	const settled = await waitVerifyingSettled(connection, {}, (v) => v.totals.calls === 2);
 	assert.equal(query.calls.readSession, 1, "读不到水位时必须保守冷读");
 	assert.equal(settled.value.totals.calls, 2, "冷读后的数字才是真的");
+});
+
+// ── 热力图与单日模式（TS-28 / TS-29；AC-1…AC-5）────────────────────────────
+//
+// 这一组的失败模式全是**静默错报**而不是抛错，所以每条都按**值**断言：
+// - `day` 只钳下界会把 day 之后的每一天都放进来（多报，且看起来完全正常）；
+// - `heatDaily` 跟着档位走会让热力图宽度随窗口跳变（切到「近 7 天」缩成 7 格）；
+// - 折叠区的天按「无记录」处理是谎报（那天有量，只是被 E1 归并进区间了）；
+// - 单日模式下把 epoch 合计挂到某一天上，得到的不是那天的真实用量。
+
+/** 跨三天的摘要：10-20 / 10-21 / 10-22 各一次调用（2 / 5 / 7 次）。 */
+function threeDaySummary() {
+	return {
+		w: W_ALPHA,
+		e: null,
+		rows: [
+			{ d: "2026-10-20", b: 0, calls: 2, in: 100, cr: 0, cw: 0, out: 10 },
+			{ d: "2026-10-21", b: 1, calls: 5, in: 200, cr: 0, cw: 0, out: 20 },
+			{ d: "2026-10-22", b: 2, calls: 7, in: 300, cr: 0, cw: 0, out: 30 },
+		],
+	};
+}
+
+test("AC-1：day 过滤只留那一天（双端钳，day 之后的天不得混进来）", () => {
+	// windowDays 用 0（不设窗口）是刻意的：那样唯一的过滤条件就是 `day`。
+	// 若实现只把 `windowStart` 换成 day（下界语义），10-21 / 10-22 会被放进来，
+	// totals.calls 变成 14——而它在「近 7 天」档下与正确答案 5 一样是「有数」，
+	// 不按值断言根本看不出来。
+	const result = tokstatsAggregate([{ rootWorkspace: W_ALPHA, summary: threeDaySummary() }], {
+		windowDays: 0, today: "2026-10-22", day: "2026-10-21",
+	});
+	assert.equal(result.totals.calls, 5, "只有 10-21 的 5 次，不是三天的 14 次");
+	assert.equal(result.daily.length, 1, "日序列只剩一行");
+	assert.equal(result.daily[0].day, "2026-10-21");
+	assert.equal(result.daily[0].calls, 5);
+	assert.equal(result.weekly.length, 1, "那一天所属的自然周");
+	// 桶分布同样只反映那一天：10-21 落桶 1。
+	assert.equal(result.buckets[1].calls, 5);
+	assert.equal(result.buckets[0].calls, 0);
+	assert.equal(result.buckets[2].calls, 0);
+});
+
+test("AC-2：day 存在时覆盖 windowDays（裁决 C 的唯一防线）", () => {
+	const entries = [{ rootWorkspace: W_ALPHA, summary: threeDaySummary() }];
+	// 对照：只给 windowDays: 7（today = 10-22 → windowStart = 10-16）→ 三天全进，14 次。
+	const withoutDay = tokstatsAggregate(entries, { windowDays: 7, today: "2026-10-22" });
+	assert.equal(withoutDay.totals.calls, 14, "对照：windowDays 生效时三天都计入");
+	assert.equal(withoutDay.daily.length, 3);
+	// 同时传 day 与 windowDays：只认 day（若 windowDays 仍然生效，会得到 14）。
+	const withDay = tokstatsAggregate(entries, { day: "2026-10-20", windowDays: 7, today: "2026-10-22" });
+	assert.equal(withDay.totals.calls, 2, "day 覆盖 windowDays，只算 10-20 的 2 次");
+	assert.equal(withDay.daily.length, 1);
+	assert.equal(withDay.daily[0].day, "2026-10-20");
+});
+
+test("AC-3：dayFolded 两态——day 落在折叠区间内为 true，区间外为 false", () => {
+	// foldedSummary 的区间是 [2026-01-01, epochEnd)；取 epochEnd = 2026-08-21。
+	const entries = [{ rootWorkspace: W_ALPHA, summary: foldedSummary("2026-08-21", 4) }];
+	// 落在区间内：那天的明细在读取期被 E1 排除，按日拆不出来 → 必须如实报告。
+	const inside = tokstatsAggregate(entries, { windowDays: 0, today: "2026-10-20", day: "2026-08-15" });
+	assert.equal(inside.dayFolded, true, "落在 [start, end) 内 → dayFolded");
+	assert.equal(inside.day, "2026-08-15", "day 回显给 client");
+	assert.equal(inside.totals.calls, 0, "明细被 E1 排除，不得返回一个偏低的数字");
+	// 区间外（且区间端点互不重叠）：那天本来就没有折叠，dayFolded 必须是 false。
+	const outside = tokstatsAggregate(entries, { windowDays: 0, today: "2026-10-20", day: "2026-10-20" });
+	assert.equal(outside.dayFolded, false, "落在区间外 → 不是折叠日");
+	// 边界：end 自身**不在**区间内（区间是 [start, end) 半开）。
+	const atEnd = tokstatsAggregate(entries, { windowDays: 0, today: "2026-10-20", day: "2026-08-21" });
+	assert.equal(atEnd.dayFolded, false, "end 是半开区间的上界，end 当天不属于折叠区");
+});
+
+test("AC-3：dayFolded 只在 day 存在时出现（纯增量，旧 client 不受影响）", () => {
+	const entries = [{ rootWorkspace: W_ALPHA, summary: foldedSummary("2026-08-21", 4) }];
+	const withoutDay = tokstatsAggregate(entries, { windowDays: 0, today: "2026-10-20" });
+	assert.equal(Object.prototype.hasOwnProperty.call(withoutDay, "dayFolded"), false, "无 day 时不得出现 dayFolded");
+	assert.equal(Object.prototype.hasOwnProperty.call(withoutDay, "day"), false, "无 day 时不得回显 day");
+	// 旧 client 拿到的是同一份形状（多一个字段也无害，但这里钉住「确实没多」）。
+	const withDay = tokstatsAggregate(entries, { windowDays: 0, today: "2026-10-20", day: "2026-10-21" });
+	assert.equal(Object.prototype.hasOwnProperty.call(withDay, "dayFolded"), true);
+});
+
+test("AC-3：非法 day 按 undefined 处理（不抛错、不退化成整窗）", () => {
+	// 手写的坏 payload 不该让端点 500（硬规则 6）；也不该被当成「没有 day」
+	// 而悄悄按 windowDays 算整窗——那样会显示一整段区间却标着单日。
+	for (const bad of ["2026-1-5", "20261020", "", "2026-10-20T00:00:00Z", "abc"]) {
+		const result = tokstatsAggregate([{ rootWorkspace: W_ALPHA, summary: threeDaySummary() }], {
+			windowDays: 7, today: "2026-10-22", day: bad,
+		});
+		assert.equal(result.totals.calls, 14, `非法 day ${JSON.stringify(bad)} 应退化成无 day（整窗）`);
+		assert.equal(Object.prototype.hasOwnProperty.call(result, "day"), false);
+	}
+});
+
+test("AC-5：epoch 载荷带 start（日键字符串），且供热力图截断折叠区", () => {
+	const result = tokstatsAggregate([{ rootWorkspace: W_ALPHA, summary: foldedSummary("2026-08-21", 4) }], {
+		windowDays: 0, today: "2026-10-20",
+	});
+	assert.notEqual(result.epoch, null);
+	assert.equal(typeof result.epoch.start, "string", "start 是日键字符串（client 用它截断热力图）");
+	assert.equal(result.epoch.start, "2026-01-01", "start 来自会话 epoch 的区间起点");
+	assert.equal(typeof result.epoch.end, "string");
+	assert.ok(result.epoch.start < result.epoch.end, "start 必须早于 end（半开区间 [start, end)）");
+	assert.ok(result.epoch.calls > 0);
+});
+
+test("AC-5：epoch === null 时仍严格为 null（不是 {} / undefined）", () => {
+	const flat = tokstatsAggregate([
+		{ rootWorkspace: W_ALPHA, summary: { w: W_ALPHA, e: null, rows: [{ d: "2026-10-20", b: 0, calls: 1, in: 10, cr: 0, cw: 0, out: 1 }] } },
+	], { windowDays: 90, today: "2026-10-20" });
+	assert.equal(flat.epoch, null, "无折叠历史 → 严格 null");
+	assert.equal(flat.epoch === undefined, false, "不得是 undefined");
+	// 多会话各自取最早 start（与 epochEnd 同一手法：区间端点互不重叠，取最小）。
+	const multi = tokstatsAggregate([
+		{ rootWorkspace: W_ALPHA, summary: foldedSummary("2026-08-21", 2) },
+		{ rootWorkspace: W_BETA, summary: { ...foldedSummary("2026-09-11", 3), e: { start: "2026-05-05", end: "2026-09-11", routes: foldedSummary("2026-09-11", 3).e.routes } } },
+	], { windowDays: 0, today: "2026-10-20" });
+	assert.equal(multi.epoch.start, "2026-01-01", "多个 start 取最早的那个");
+	assert.equal(multi.epoch.end, "2026-08-21", "end 仍取最早的代表日");
+});
+
+test("AC-4：heatDaily 恒为 84 天，不随 request.windowDays 变（端点级）", async () => {
+	// 必须在**真实 apply 管线 + 端点**上钉：纯函数只能证明「传 84 就返回 84」，
+	// 而 readSummary 里那一行 `windowDays: TOKSTATS_HEATMAP_DAYS` 若被「顺手」
+	// 改成 `requestedDays ?? defaultWindowDays`，纯函数断言仍然全绿。
+	//
+	// 行相对**真实今天**生成：端点的 today 取 Date.now()，写死日期会让窗口漂移。
+	const today = new Date();
+	const rows = [];
+	for (let i = 99; i >= 0; i -= 1) {
+		const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+		const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+		rows.push({ d: key, b: 0, calls: 1, in: 10, cr: 0, cw: 0, out: 1 });
+	}
+	const connection = makeConnection();
+	const cache = makeProjectionCache({
+		[HEADER.id]: { [TOKSTATS_KEY]: { w: HEADER.cwd, e: null, rows } },
+	});
+	const query = makeSessionQuery([{ header: HEADER }], { [HEADER.id]: sampleLog(HEADER) });
+	const { ctx } = makeCtx({ connection, sessionQuery: query, sessionProjectionCache: cache });
+	// verifyStale: false 关掉后台校验：否则首帧会排冷读、把这份夹具缓存覆盖成
+	// sampleLog 的两行，测的就不是「同一份 entries 两个窗口」了。
+	startTokstats(ctx, { verifyStale: false });
+
+	const seven = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_ENDPOINT, { windowDays: 7 });
+	const all = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_ENDPOINT, { windowDays: 0 });
+	assert.equal(seven.ok, true);
+	assert.equal(all.ok, true);
+	// 主聚合确实跟着档位走（否则下面的「逐项相等」可能是两边都空）。
+	assert.equal(seven.value.windowDays, 7, "主聚合的 windowDays 回显请求值");
+	assert.equal(all.value.windowDays, 0);
+	assert.ok(seven.value.daily.length <= 7, `主聚合只有 7 天窗口内的天，实际 ${seven.value.daily.length}`);
+	assert.ok(all.value.daily.length > 84, "「全部」档的主聚合含 100 天");
+	// heatDaily：两档逐项相等，且恒 84 天。
+	assert.ok(Array.isArray(seven.value.heatDaily), "端点返回值里必须有 heatDaily");
+	assert.deepEqual(seven.value.heatDaily, all.value.heatDaily, "heatDaily 必须逐项相等（不随档位变）");
+	assert.equal(seven.value.heatDaily.length, TOKSTATS_HEATMAP_DAYS, `heatDaily 恒 ${TOKSTATS_HEATMAP_DAYS} 天`);
+	assert.equal(all.value.heatDaily.length, TOKSTATS_HEATMAP_DAYS);
+	// 常量值本身也钉住：84 = 12 周 × 7 天（SPEC D2）。
+	assert.equal(TOKSTATS_HEATMAP_DAYS, 84, "84 = 12 周 × 7 天");
+	// 窗口下界：heatDaily 的最早一天 = 今天 − 83。
+	const earliest = seven.value.heatDaily[0].day;
+	const expectedEarliest = rows[rows.length - TOKSTATS_HEATMAP_DAYS].d;
+	assert.equal(earliest, expectedEarliest, "heatDaily 覆盖最近 84 天");
+});
+
+test("AC-4：heatDaily 是纯增量字段，且不进投影状态（TS-01 / TS-16）", async () => {
+	const connection = makeConnection();
+	const cache = makeProjectionCache({
+		[HEADER.id]: { [TOKSTATS_KEY]: { w: HEADER.cwd, e: null, rows: [{ d: D1, b: 3, calls: 2, in: 200000, cr: 0, cw: 0, out: 90 }] } },
+	});
+	const query = makeSessionQuery([{ header: HEADER }], { [HEADER.id]: sampleLog(HEADER) });
+	const { ctx, state } = makeCtx({ connection, sessionQuery: query, sessionProjectionCache: cache });
+	startTokstats(ctx, { verifyStale: false });
+	const result = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_ENDPOINT, {});
+	assert.equal(result.ok, true);
+	assert.ok(Array.isArray(result.value.heatDaily));
+	// 投影单元定义本身不得带 heatDaily：它只出现在 RPC 返回值里（不进 state）。
+	const def = state.registered[0];
+	const view = def.wire.view(def.init(HEADER, 0));
+	assert.deepEqual(Object.keys(view).sort(), ["e", "rows", "w"], "wire.view 键集不变（TS-01）");
+	assert.equal(view.heatDaily, undefined, "heatDaily 不得进投影状态");
+});
+
+test("TS-29：单日模式下 heatDaily 照常 84 天（SPEC D15：不特判）", async () => {
+	const connection = makeConnection();
+	const today = new Date();
+	const rows = [];
+	for (let i = 89; i >= 0; i -= 1) {
+		const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+		const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+		rows.push({ d: key, b: 0, calls: i + 1, in: 10, cr: 0, cw: 0, out: 1 });
+	}
+	const cache = makeProjectionCache({ [HEADER.id]: { [TOKSTATS_KEY]: { w: HEADER.cwd, e: null, rows } } });
+	const query = makeSessionQuery([{ header: HEADER }], { [HEADER.id]: sampleLog(HEADER) });
+	const { ctx } = makeCtx({ connection, sessionQuery: query, sessionProjectionCache: cache });
+	startTokstats(ctx, { verifyStale: false });
+	const selected = rows[rows.length - 3].d;
+	const single = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_ENDPOINT, { windowDays: 7, day: selected });
+	assert.equal(single.ok, true);
+	assert.equal(single.value.day, selected, "day 回显");
+	assert.equal(single.value.dayFolded, false);
+	assert.equal(single.value.daily.length, 1, "单日主聚合只有一行");
+	assert.equal(single.value.daily[0].day, selected);
+	// 热力图仍要显示整周形状与选中格：它必须还是 84 天，不是 1 天。
+	assert.equal(single.value.heatDaily.length, TOKSTATS_HEATMAP_DAYS, "单日模式下 heatDaily 仍恒 84 天");
+});
+
+test("TS-29：单日模式下 epoch 合计不得挂到那一天（否则数字不是那天的）", () => {
+	// 有折叠历史的会话 + day 落在区间外：若实现照常把 epoch 合计加到
+	// 代表日（或加到 day 上），单日面板就会显示一段区间的量。
+	const summary = {
+		w: W_ALPHA,
+		e: { start: "2026-01-01", end: "2026-08-21", routes: [{ rt: "", buckets: [{ calls: 9, in: 100, cr: 0, cw: 0, out: 5 }, ...Array.from({ length: TOKSTATS_BUCKET_COUNT - 1 }, () => ({ calls: 0, in: 0, cr: 0, cw: 0, out: 0 }))] }] },
+		rows: [{ d: "2026-10-20", b: 1, calls: 3, in: 50, cr: 0, cw: 0, out: 2 }],
+	};
+	const result = tokstatsAggregate([{ rootWorkspace: W_ALPHA, summary }], {
+		windowDays: 0, today: "2026-10-20", day: "2026-10-20",
+	});
+	assert.equal(result.totals.calls, 3, "只算那天的 3 次，不是 3 + 折叠区间的 9 次");
+	assert.equal(result.daily.length, 1);
+	assert.equal(result.daily[0].calls, 3);
+	assert.equal(result.dayFolded, false, "day 不在折叠区间内");
+	// 对照：同一份 summary 在区间模式下，epoch 合计照常计入（既有语义不变）。
+	const range = tokstatsAggregate([{ rootWorkspace: W_ALPHA, summary }], { windowDays: 0, today: "2026-10-20" });
+	assert.equal(range.totals.calls, 12, "区间模式：3 + 9 = 12（既有行为不受影响）");
+});
+
+test("TS-29：day 落在折叠区间内时 epoch 端点仍要报（client 靠它截断热力图）", () => {
+	// 单日模式下 epoch 的**数字**不计入，但 `start`/`end` 必须报出来：client 用
+	// 它们把热力图的折叠区渲染成「不可按日拆」。不报的话那些格子会显示成
+	// 「无记录」——那天有量、只是被折叠了，那是谎报（AC-9 的反向断言）。
+	const result = tokstatsAggregate([{ rootWorkspace: W_ALPHA, summary: foldedSummary("2026-08-21", 4) }], {
+		windowDays: 0, today: "2026-10-20", day: "2026-08-15",
+	});
+	assert.equal(result.dayFolded, true);
+	assert.notEqual(result.epoch, null, "折叠日必须仍报 epoch 端点");
+	assert.equal(result.epoch.start, "2026-01-01");
+	assert.equal(result.epoch.end, "2026-08-21");
+	assert.equal(result.epoch.calls, 4, "epoch.calls 如实给出区间合计（供热力图 tooltip 说明）");
+	assert.equal(result.totals.calls, 0, "但那天的明细数不得凭空补出来");
 });
 
 
