@@ -273,6 +273,7 @@ barePackageName(specifier)                        ← 必须是裸包名
 
 - 收录事实（2026-10-25 核验）：条目 `PlusQi/dsh-tokstats`，`added 2026-10-23`，category `usage`，安装命令 `github:PlusQi/dsh-tokstats`（未固定 ref，默认分支最新）。另一家目录 dshpluginhub.ai 的收录停留在旧名 `dsh-plugins` + pre-rename commit，**勿以它为准**。
 - 截图序按「卡片可读性」排：宽幅在前（tokprev / promptopt / hero），近方形全图垫底——卡片首屏只展示前两张。
+- 内容多的面板可用「总览 + 详情」两张刻意图覆盖全部卡片（当前 `tokstats-hero` + `tokstats-detail`）：单图塞全会退回竖比例、卡片里照样糊；裁切带落在**行边界**上，读作滚动中的面板而非残缺；无卡头的续行（如 detail 顶部的模型排行剩余行）只服务市场卡片，不要单独进 README。
 - 可选大招（未做）：打 GitHub Release 预构建 tarball + 条目加 `tarball:` 字段，市场优先展示它、免 `allowBuilds` 警告；发 npm 则连 engines chip 一起解掉。两者都动「不发 registry」的既定发布线，需维护者裁决。
 
 ## 维护须知
