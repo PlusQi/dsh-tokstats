@@ -36,10 +36,12 @@ git tag vX.Y.Z; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安�
 tokstats 的两张图由 `scripts/render-screenshots.mjs` 生成，**不再从真宿主截图**：
 
 ```bash
-node scripts/render-screenshots.mjs --lang zh   # → docs/assets/tokstats.png
-node scripts/render-screenshots.mjs --lang en   # → docs/assets/tokstats-en.png
+node scripts/render-screenshots.mjs --lang zh --theme light   # → docs/assets/tokstats.png
+node scripts/render-screenshots.mjs --lang en --theme light   # → docs/assets/tokstats-en.png
 ```
 
+- **进包的这两张是亮色主题**（2026-10-26 裁决）：市场详情页与 README 的背景是白底，暗色面板图贴在白底上是一块黑，缩略到卡片尺寸后「面板感」过重；亮色版与宿主默认（`body` = 亮色）一致，也更容易看清排印层级。**脚本的默认主题仍是暗色**（`--theme` 缺省 `dark`），所以**必须显式带 `--theme light`**，漏了就会把暗色图覆盖进仓库——两套主题都要像素级看过时，用 `--out /tmp/x.png` 出对照图，别直接覆盖。
+- **亮色可读性由 TS-35 兜住**：宿主亮色里 `bg-base` 与 `bg-layer-1` 同为纯白，卡片分层全靠边框；卡面用 l2、分隔线用 l1。换主题或调边框前先看 [docs/INVARIANTS.md](./INVARIANTS.md) 的 TS-35，`npm test` 有对应断言。
 - **数据是脚本内固定的示例**（模型 `example/*` / `demo/*`、工作区 `D://projects//*`、128 个会话）：真宿主截图必然带本机的模型名、工作区路径与会话标题，那些不该进公开仓库；固定示例也让任何人跑出来的图一致。**模型排行 6 条是效果图的高度预算**（市场卡片单张全图，双列贪心随行数重排），长排行场景由测试夹具覆盖。
 - **渲染走真实产物**：脚本经 `test/client-harness.mjs` 捕获真实 `lib/client.js`，用真实组件树 + 真实 CSS 落成静态页，再用无头 chromium 截图——手抄 DOM 只能证明「抄的那份能对齐」。主题 token 取自 `app.asar` 的两个主题块（`body` = 亮色、`body[data-ds-dark-theme]` = 暗色），`--theme light` 可出亮色版。
 - **默认是「近 30 天」档**（`--range` 可换）：这一档能同时看到逐日柱图、周趋势条列表（含本周「进行中」）与自适应两列，信息最全；缺省「当日」档看不到周趋势卡，不适合当效果图。
