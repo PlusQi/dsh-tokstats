@@ -2,6 +2,13 @@
 
 简体中文 | [English](./README.en.md)
 
+<p align="center">
+  <a href="https://github.com/PlusQi/dsh-tokstats/tags"><img src="https://img.shields.io/github/v/tag/PlusQi/dsh-tokstats?label=version&style=flat" alt="version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/PlusQi/dsh-tokstats?style=flat" alt="license"></a>
+  <a href="https://github.com/PlusQi/dsh-tokstats/stargazers"><img src="https://img.shields.io/github/stars/PlusQi/dsh-tokstats?style=flat" alt="stars"></a>
+  <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/DeepSeek_Harness-dsh--plugin-blue?style=flat" alt="dsh-plugin"></a>
+</p>
+
 可能有用的 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) token汇总插件，告诉你token花哪了：
 
 | 插件 | 有什么用 | 在哪看到 |
