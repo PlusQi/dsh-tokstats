@@ -16,10 +16,25 @@
 ```powershell
 git remote add origin git@github.com:PlusQi/dsh-tokstats.git
 git push -u origin master
-git tag vX.Y.Z; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安装靠它，漏打则该版本号装不上；显式 ref 而非 --tags
+git tag -a vX.Y.Z -m "vX.Y.Z：<一句话摘要>"; git push origin refs/tags/vX.Y.Z   # 必做：#vX.Y.Z 固定安装靠它，漏打则该版本号装不上；显式 ref 而非 --tags
 ```
 
-**打 tag 前的硬门槛**：link 安装目标提交 -> 重启 dsh web -> 刷新页面，目检**每个插件**的 UI 元素实际渲染。"启动无报错 ≠ 插件正常工作"——slot 注册是副作用，apply 提前返回或抛错都可能静默失效。目检不过不打 tag。
+### 两道闸门（2026-10-26 分层）
+
+**先理解一件事：`master` 是发布线，不是集成线。** 社区目录条目的安装命令是裸地址 `github:PlusQi/dsh-tokstats`，条目 schema 没有版本或 ref 字段，市场用户点安装拿到的就是默认分支 HEAD；pnpm 解析 git 裸地址时把 committish 补成 `HEAD`（`resolveGitCommit` → `resolveRef`，查找顺序 `refs["HEAD"]` 排第一），**git 地址没有「latest tag」语义**。所以「推 master」与「用户能装到」是同一个动作。详见 [AGENTS.md](../AGENTS.md)「`master` 是发布线」。
+
+由此分成两层，管两件不同的事：
+
+| 时机 | 门槛 | 做法 | 什么算不合格 |
+| --- | --- | --- | --- |
+| **推 `master`** | 不是半成品 | `node scripts/check-plugin-structure.js`（`pre-push` 也会跑）+ `npm test` 绿 + CHANGELOG 的 `[Unreleased]` 已记录本批变更 | 有 WIP / 未完成意图的提交；变更没进 CHANGELOG；guard 或测试红 |
+| **打 `vX.Y.Z`** | 完整目检 | link 安装目标提交 → 重启 dsh web → 刷新页面 → 目检**每个插件**的 UI 元素实际渲染 | 没走完上面的目检 |
+
+**为什么这样分**：目检要从应用退出重开（desktop profile 由 Electron 独占，`AGENTS.local.md` 记了这条），一天十几笔提交不可能每笔都做；而「不是半成品」是每次推送都做得到的。旧版把目检写成「打 tag 前的硬门槛」，等于闸门保护了一条没人走的路——发布实际发生在推 master 时。**tag 的语义是「这个快照被完整验过」，不是「从这里开始才可以发布」。**
+
+**「启动无报错 ≠ 插件正常工作」**：slot 注册是副作用，apply 提前返回或抛错都可能静默失效。所以目检不能只看日志，要看到界面元素。
+
+顺序恒为「先推 master，再打 tag」——tag 指向的提交必须已在远端。
 
 推上去即可被安装，无需注册表。`files` 字段保证打包形态（git 安装 / npm 安装都走打包）只带运行必需件加文档：
 `lib/` + `icon.svg` + `cordis.patch.yml` + `locale/` + `screenshots.json` + `docs/assets/` 下的截图与位图店招（README 嵌图与市场卡片图，**漏了则打包形态下 README 图片断链、市场卡片丢图**）+ `AGENTS.md` / `CHANGELOG.md` / `docs/MAINTAINING.md` / `docs/INVARIANTS.md`（README / LICENSE / package.json 由打包器自动附带，不必列）。

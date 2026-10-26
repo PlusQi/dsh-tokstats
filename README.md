@@ -16,14 +16,15 @@
 
 ```powershell
 npm i -g pnpm
-npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
+npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats#v0.9.0
 ```
 
 **装完必须重启宿主进程**（profile 组合只在启动时生效），再刷新页面。没有配置文件、没有 API key、没有构建步骤。
 
-- 固定版本：`add github:PlusQi/dsh-tokstats#v0.8.0`
-- 本机开发：`add link:D:\path\to\dsh-tokstats`，改完代码重启即生效
-- profile 不叫 `web` 就换成你自己的
+- **上面这条带 `#v0.9.0`，装的是一个固定快照**，推荐这种方式；
+- 想跟最新：去掉 `#v0.9.0`，即 `add github:PlusQi/dsh-tokstats`——**这条装的是默认分支（`master`）的最新代码**，不是「最新正式版」。git 地址没有 npm 那种 `latest` 概念，任何不带 `#ref` 的写法都指向分支 HEAD。市场目录里的安装按钮用的就是这种裸地址，所以从商店装也一样是跟主线；
+- 本机开发：`add link:D:\path\to\dsh-tokstats`，改完代码重启即生效；
+- profile 不叫 `web` 就换成你自己的。**桌面版（Electron）不能用 CLI 装**——`desktop` profile 由应用独占，CLI 会拒绝；请在应用内的「设置 → 插件」里装。
 
 ## 装完看这三处
 

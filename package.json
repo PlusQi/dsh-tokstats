@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokstats",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "token 花在哪一目了然：tokstats 跨会话用量统计（模型与工作区排行）、tokprev 发送前 token 预告、promptopt 草稿结构化整理。",
   "type": "module",
   "main": "lib/index.js",

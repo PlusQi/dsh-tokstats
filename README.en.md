@@ -16,14 +16,15 @@ Prerequisites: Node.js, git, pnpm.
 
 ```powershell
 npm i -g pnpm
-npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats
+npx @deepseek-ai/dsh plugin --profile web add github:PlusQi/dsh-tokstats#v0.9.0
 ```
 
 **Restart the host process afterwards** (profile composition only happens at startup), then reload the page. No config file, no API key, no build step.
 
-- Pin a version: `add github:PlusQi/dsh-tokstats#v0.8.0`
-- Local development: `add link:D:\path\to\dsh-tokstats`, edit and restart to see changes
-- If your profile is not called `web`, use yours instead
+- **The command above carries `#v0.9.0` and installs a pinned snapshot** — that is the recommended form;
+- To follow the latest, drop `#v0.9.0` and use `add github:PlusQi/dsh-tokstats` — **that installs the tip of the default branch (`master`), not "the latest release"**. Git addresses have no npm-style `latest`; any spec without a `#ref` resolves to the branch HEAD. The marketplace listing's install button uses exactly this bare address, so installing from the store also follows the mainline;
+- Local development: `add link:D:\path\to\dsh-tokstats`, edit and restart to see changes;
+- If your profile is not called `web`, use yours instead. **The desktop (Electron) app cannot install through the CLI** — the `desktop` profile is owned by the application and the CLI refuses it; use Settings → Plugins inside the app.
 
 ## Check these three places
 

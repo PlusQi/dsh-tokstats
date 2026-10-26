@@ -177,6 +177,25 @@ scope 可省略：跨多模块或纯性质类提交（如 `docs: 修正错别字
 
 约定：`<scope>` 与提交 scope 同源（插件名 / pack / repo），slug 用小写连字符；分支生命与一个意图绑定，合回 master 后删除，不长期存活。
 
+### `master` 是发布线（2026-10-26 登记）
+
+**`master` 不是集成线。推到 master 就等于发布。** 这条不是偏好，是分发现状决定的：
+
+- 社区目录条目的安装命令是裸地址 `github:PlusQi/dsh-tokstats`（条目 schema 只有 `url` / `name` / `category` / `description` / `icon` 五个字段，**没有版本或 ref 字段**，见 `docs/MAINTAINING.md`「分发与元数据纪律」），市场用户点安装拿到的是**默认分支 HEAD**；
+- pnpm 解析 git 裸地址时把 committish 补成 `HEAD`（`resolveGitCommit` → `resolveRef`，查找顺序里 `refs["HEAD"]` 排第一），**不存在「latest tag」语义**——那是 npm registry 的 `dist-tag` 才有的事，而本包不发 npm；
+- 所以「推 master」与「让用户装到 master 上的东西」是同一个动作，中间没有缓冲层。
+
+由此把闸门分两层，各自管一件事（详述见 `docs/MAINTAINING.md`「发布到 GitHub」）：
+
+| 时机 | 门槛 | 什么算不合格 |
+| --- | --- | --- |
+| 推 `master` | **不是半成品** | 有 WIP / 未完成意图的提交；CHANGELOG 的 `[Unreleased]` 未记录该变更；guard 或 `npm test` 红 |
+| 打 `vX.Y.Z` tag | **完整目检** | 未按「link 安装目标提交 → 重启宿主 → 逐插件目检 UI 渲染」走过一遍 |
+
+**tag 的语义是「这个快照被完整验过」，不是「可以发布了」**——可发布这件事在推 master 时就已经发生了。因此：**不要为了让 master 上「看起来没有未发布的东西」而急着打 tag**，也不要因为「反正有 tag 兜底」就往 master 推半成品。两层各管各的，不能互相替代。
+
+只推 tag 不推 master 是不可能的（tag 指向的提交必须已在远端），所以顺序恒为「先推 master，再打 tag」。
+
 **闸门分层**（`scripts/git/hooks/`，经 `core.hooksPath` 启用）：
 
 | 时点 | 机制 | 拦什么 |
