@@ -37,6 +37,12 @@
       "types": "./lib/types/client.d.ts",
       "default": "./lib/client.js"
     },
+    "./tokprev": "./lib/index.js",
+    "./promptopt": "./lib/index.js",
+    "./tokprev/icon": "./icon.svg",
+    "./promptopt/icon": "./icon.svg",
+    "./tokprev/locale/*.json": "./locale/tokprev/*.json",
+    "./promptopt/locale/*.json": "./locale/promptopt/*.json",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },

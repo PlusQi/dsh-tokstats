@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Next-turn Token Forecast",
+    "description": "Estimates how many tokens the next turn will feed in, anchored to the last real request plus the draft increment."
+  }
+}

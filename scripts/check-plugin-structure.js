@@ -63,13 +63,48 @@ if (pluginsBlock === null) {
 	}
 }
 
-// ── 硬规则 1：patch 行 name 必须是裸包名（等于 package.json 的 name） ──
+// ── 硬规则 1：patch 行 name 分两档 —— 恰好一行裸包名（client 锚点）+ 其余子路径 ──
+//
+// 宿主的 per-row 展示文案只有一条通道：`dsh-plugin-manager` 的 declaredRows
+// `metaOf(row.name)` → `readPluginMeta` 读 `${row.name}/locale/en.json`。而 `name`
+// 同时是 Loader 的模块名和 client 图的发现键（`exactPackageSpecifier` 拒绝含 `/`）。
+// 于是两档分工：
+//   - 裸包名（**恰好一行**）：client 锚点，读包级 `locale/`，显示包自己的文案；
+//   - `<包名>/<插件>`：子路径行，读 `locale/<插件>/`，各显示自己的名称与描述；
+//     不进 client 图（host-only），模块解析由 exports 的 `./<插件>` 放行。
+// 没有裸包名行时 client 图整块消失且宿主不报错，所以「至少一行」是硬要求。
+const anchorRows = [];
+const subpathRows = [];
 for (const row of rows) {
 	if (row.name === null) {
-		problems.push(`cordis.patch.yml L${row.line} (id: ${row.id}): 缺少 name 字段 —— client 半边无法按包名发现`);
-	} else if (row.name !== pkgName) {
-		problems.push(`cordis.patch.yml L${row.line} (id: ${row.id}): name 为 '${row.name}'，必须是裸包名 '${pkgName}'（子路径只剩 host 半边；该值必须等于 package.json 的 name —— PK-14）`);
+		problems.push(`cordis.patch.yml L${row.line} (id: ${row.id}): 缺少 name 字段 —— 该行既不能被发现，也没有展示文案来源（PK-01）`);
+		continue;
 	}
+	if (row.name === pkgName) {
+		anchorRows.push(row);
+		continue;
+	}
+	// 既不是裸包名、也不是本包子路径（别家包、相对路径、绝对路径）：那是「本包里挂了别人的插件」。
+	if (!row.name.startsWith(`${pkgName}/`)) {
+		problems.push(`cordis.patch.yml L${row.line} (id: ${row.id}): name 为 '${row.name}'，必须是裸包名 '${pkgName}'（client 锚点）或它的子路径 '${pkgName}/<插件>' —— 其它形态既进不了 client 图、也读不到本包的展示文案（PK-01）`);
+		continue;
+	}
+	const suffix = row.name.slice(pkgName.length + 1);
+	if (suffix.includes("/")) {
+		problems.push(`cordis.patch.yml L${row.line} (id: ${row.id}): name 为 '${row.name}'，子路径只允许一层（'${pkgName}/<插件>'）—— 多层子路径的 locale 目录映射无法静态核对（PK-01）`);
+		continue;
+	}
+	// 子路径与它实际跑的插件必须同名：否则「组件显示的是 A 的名字、跑的是 B」，
+	// 宿主侧完全看不出来（文案来自 name、行为来自 config.plugin）。
+	if (row.plugin !== null && row.plugin !== suffix) {
+		problems.push(`cordis.patch.yml L${row.line} (id: ${row.id}): name 的子路径 '${suffix}' 与 config.plugin '${row.plugin}' 不一致 —— 展示文案按 name 取、行为按 config.plugin 分发，二者必须同名（PK-01）`);
+	}
+	subpathRows.push({ row, suffix });
+}
+if (anchorRows.length === 0) {
+	problems.push(`cordis.patch.yml: 没有任何一行的 name 是裸包名 '${pkgName}' —— client 半边按裸包名建图（exactPackageSpecifier 拒绝含 '/'），缺锚点时浏览器侧整块不加载：三个插件的 UI 全部消失，而宿主一行日志都不打印（PK-01）`);
+} else if (anchorRows.length > 1) {
+	warnings.push(`cordis.patch.yml: 有 ${anchorRows.length} 行使用裸包名 '${pkgName}'（L${anchorRows.map((row) => row.line).join(", L")}）—— 展示文案按 name 取，它们会显示完全相同的标题与描述；除锚点外应改用子路径行（PK-01）`);
 }
 
 // ── 硬规则 3：config.plugin 必须已在 PLUGINS 注册 ──
@@ -460,6 +495,72 @@ const filesList = Array.isArray(pkg.files) ? pkg.files : [];
 const localeCovered = filesList.some((entry) => typeof entry === "string" && /^\.?\/?locale(\/|$)/.test(entry));
 if (!localeCovered) {
 	problems.push(`package.json files: 缺少 "locale"（现有 ${filesList.join(", ") || "空"}）—— npm / git 安装按 files 白名单打包，locale 会被丢掉；本机 link 安装是 junction 直通仓库、看不出这个问题，只能靠 "npm pack --dry-run" 验（PK-13）`);
+}
+
+// ── PK-13 第二段：子路径行的展示文案（每个子路径行一套 locale + 导出放行）──
+//
+// 子路径行（硬规则 1 的第二档）靠 `${name}/locale/en.json` 取自己的标题与描述，
+// 也就是 exports 必须放行 `./<插件>/locale/*.json` 且放行 `./<插件>` 本身——
+// 后者是 Loader 解析该行模块的入口，缺了它整行 import 失败（表现为「组件消失」，
+// 而不是「文案不对」）。三种缺法都不会在运行期报一条人能看懂的错：
+//   ① 没有 locale/<插件>/ 目录 → readPluginMeta 拿不到字典 → 回退到完整模块名
+//      `dsh-tokstats/tokprev`，读者看到的是技术标识；
+//   ② exports 漏 `./<插件>/locale/*.json` → ERR_PACKAGE_PATH_NOT_EXPORTED，同①；
+//   ③ exports 漏 `./<插件>` → Loader import 失败，该行整块不加载。
+// 所以三条都要静态拦，且只对**实际存在的子路径行**要求（锚点行不适用）。
+for (const { row, suffix } of subpathRows) {
+	const rowLocaleDir = join(localeDir, suffix);
+	let rowLocaleFiles = [];
+	try {
+		rowLocaleFiles = readdirSync(rowLocaleDir).filter((name) => name.endsWith(".json")).sort();
+	} catch {
+		problems.push(`locale/${suffix}/: 不存在 —— 子路径行 '${row.name}'（cordis.patch.yml L${row.line}）的展示文案按 name 取字典，缺目录时宿主静默回退到完整模块名 '${row.name}'，组件卡片显示技术标识（PK-13）`);
+		continue;
+	}
+	if (!rowLocaleFiles.includes("en.json")) {
+		problems.push(`locale/${suffix}/: 缺少 en.json（现有 ${rowLocaleFiles.join(", ") || "空"}）—— 宿主只以 en.json 为入口探测字典，其它语言文件会被整目录忽略（PK-13）`);
+	}
+	for (const name of rowLocaleFiles) {
+		const language = name.slice(0, -5);
+		if (!LANG_ID.test(language)) {
+			problems.push(`locale/${suffix}/${name}: 文件名不是语言 id（须匹配 ${LANG_ID}）—— 宿主 dictionariesOf 会直接抛错，该行元数据退化为模块名（PK-13）`);
+			continue;
+		}
+		let parsed;
+		try {
+			parsed = JSON.parse(readFileSync(join(rowLocaleDir, name), "utf8"));
+		} catch (error) {
+			problems.push(`locale/${suffix}/${name}: 不是合法 JSON（${String(error).split("\n")[0]}）—— 宿主 readObject 抛错后该行只剩错误诊断，组件行无标题（PK-13）`);
+			continue;
+		}
+		const meta = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed.meta : undefined;
+		if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
+			problems.push(`locale/${suffix}/${name}: 缺少 meta 外壳（形如 {"meta":{"title":…,"description":…}}，当前顶层键 ${Object.keys(parsed ?? {}).join(", ") || "无"}）—— 宿主 dictionariesOf 只读 meta.title / meta.description，会静默回退到模块名（PK-13）`);
+			continue;
+		}
+		for (const field of ["title", "description"]) {
+			const value = meta[field];
+			if (typeof value !== "string" || value.trim() === "") {
+				problems.push(`locale/${suffix}/${name}: 缺少 meta.${field}（须为非空字符串）—— 宿主 readPluginMeta 会静默回退（${field === "title" ? "标题变模块名" : "描述取不到"}）（PK-13）`);
+			}
+		}
+		const extra = Object.keys(meta).filter((key) => key !== "title" && key !== "description");
+		if (extra.length > 0) {
+			warnings.push(`locale/${suffix}/${name}: meta 含宿主不读的键 ${extra.join(", ")} —— readPluginMeta 只消费 title / description，其余是死字段（PK-13）`);
+		}
+	}
+	// 子路径行的三处导出：模块入口、locale 通配、icon（有则更好，缺了退回默认插画）。
+	for (const [needed, why] of [
+		[`./${suffix}`, `子路径行 '${row.name}' 的模块入口；缺了它 Loader import 失败，该行整块不加载`],
+		[`./${suffix}/locale/*.json`, `子路径行 '${row.name}' 的展示字典；缺了它 optionalResourcePath 抛 ERR_PACKAGE_PATH_NOT_EXPORTED，组件标题退化为 '${row.name}'`],
+	]) {
+		if (!exportKeys.includes(needed)) {
+			problems.push(`package.json exports: 缺少 "${needed}"（现有键 ${exportKeys.join(", ") || "无"}）—— ${why}（PK-13）`);
+		}
+	}
+	if (!exportKeys.includes(`./${suffix}/icon`)) {
+		warnings.push(`package.json exports: 缺少 "./${suffix}/icon" —— 子路径行 '${row.name}' 的组件行没有图标导出，宿主显示默认插画（PK-13）`);
+	}
 }
 
 // ── PK-15：`engines.dsh` 与 `dsh.compatibility.dshReleases` 必须表达同一事实 ──

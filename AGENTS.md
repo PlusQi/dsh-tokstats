@@ -38,7 +38,7 @@
 
 ## 硬规则
 
-1. **patch 行 name 必须是裸包名 `'dsh-tokstats'`**：client 半边按包名发现；写成子路径只剩 host 半边；
+1. **patch 行 name 分两档，且恰好一行是裸包名 `'dsh-tokstats'`**：裸包名行是 **client 锚点**（client 半边只按裸包名发现，写全是子路径时浏览器侧整块不加载且宿主不报错）；其余行用一层子路径 `'dsh-tokstats/<插件>'`，靠 `<name>/locale/` 读各自的展示文案。两档在 `package.json` 的 `exports` 里都要放行（`./<插件>` 与 `./<插件>/locale/*.json`），且子路径必须与 `config.plugin` 同名；
 2. **client 模块图按包扁平**：所有插件实现在 `lib/client.js` 单文件内，禁止拆分文件或使用相对路径 `require`（factory 的 require 只认模块表词）；
 3. **host 按行分 fiber，client 每包单 fiber**：patch 每行建一个 host fiber（`config.plugin` 是 host 侧分发键，`lib/index.js` 的 `apply(ctx, config)` 据此分发——纯 UI 插件 host 半边为空，tokstats 的聚合器宿主在自己的行 fiber 上）；client boot manifest 每包只建一个条目且不传 config，`lib/client.js` 的 apply 无条件注册 `PLUGINS` 全部插件。新增插件必须同时在 `PLUGINS` 注册表注册，由 guard 静态校验防漂移（v0.2.3 前的"客户端按 config 分发 + 未注册告警"模型已废弃）；
 4. **每插件独立样式 tag**：经 `ensurePluginStyles` 注入 `data-plugin-css="dsh-tokstats/<id>"`，禁止包级共享 `<style>`；

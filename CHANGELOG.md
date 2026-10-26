@@ -6,6 +6,13 @@
 
 ### Changed
 
+- **插件页「包含的组件」里三个组件各有自己的名字与描述**：此前三行的标题都是「Token 用量工具箱」、描述也都是包级那同一句，读者只能靠下面两行灰色小字分辨谁是谁，看着像渲染重复的故障。根因在宿主一侧：行的标题/描述只有 `metaOf(row.name)` → `readPluginMeta` 读 `${row.name}/locale/en.json` 这一条通道，没有 `row.label` 之类可按行命名的字段；而三行的 `name` 全是裸包名，于是三次读到同一份包级字典。本次按「恰好一行留裸包名 + 其余行用子路径」分档：
+  - **`tokstats` 行保留裸包名 `dsh-tokstats`**，它是 **client 锚点**——`dsh-client-modules` 的 `exactPackageSpecifier` 拒绝含 `/` 的行名，只有裸包名行会进浏览器模块图，缺了它三个插件的 UI 会整块消失而宿主不打印任何日志。该行继续显示包级文案。
+  - **`tokprev` / `promptopt` 行改为子路径 `dsh-tokstats/tokprev` / `dsh-tokstats/promptopt`**，各带一份 `locale/<插件>/{zh,en}.json`，于是组件列表里显示「发送前 Token 预告」/「提示词结构化整理」（英文界面为 `Next-turn Token Forecast` / `Prompt Restructure`）及各自的描述。`package.json` 的 `exports` 相应放行 `./<插件>`（模块入口，解析到同一个 `lib/index.js`，`config.plugin` 照旧分发）、`./<插件>/locale/*.json`（字典入口）与 `./<插件>/icon`。
+  - **行为变化（须知）**：client 半边仍按裸包名建图，所以**禁用 tokstats 行会连带卸载 tokprev / promptopt 的浏览器 UI**；禁用子路径行只摘自己的 host fiber。按插件独立关客户端 UI 仍需拆包。
+  - `AGENTS.md` 硬规则 1、`docs/INVARIANTS.md` 的 PK-01 / PK-13、`docs/MAINTAINING.md` 的「client bundle 按包名发现」与「展示元数据」两节同步改写；guard 的硬规则 1 改为两档校验（零锚点 / 多层子路径 / 与 `config.plugin` 错配 → 拦，多行裸包名 → WARN），并新增「PK-13 第二段」逐个子路径行校验 locale 目录与 `exports` 入口。
+
+
 - **市场卡片与插件页简介统一为「token 花在哪一目了然」，tokstats 效果图收敛为单张全图**：dsh-market 卡片上的简介是收录进 awesome-dsh-plugin 目录时生成的摘要，带着「宿主会话投影单元」「采纳才写回」两处实现黑话——浏览者三秒内读不懂这个插件给自己带来什么；卡片首屏两张又是 tokstats 中/英版的近方形竖图（1536×1856，比例 0.83），缩进卡片里小而糊，且两版近乎重复、白费一轮播位。本次三处同义改写 + 截图收敛：
   - **`locale/{zh,en}.json` 的 `meta.description`**（宿主设置 → 插件页显示的那句）改为痛点句式：「token 花在哪一目了然：跨会话用量统计、模型与工作区排行，附发送前预告与草稿整理。」/ `See where your tokens go: cross-session usage stats with model and workspace breakdowns, plus a next-turn forecast.`；
   - **`package.json` 的 `description`**（npm 元数据与宿主 `listBundles`）同步去掉「注册官方会话投影单元」等实现措辞，改为同一句式并保留三个插件名（tokstats / tokprev / promptopt）供检索——爬虫若重新生成目录摘要，源材料一致才不会漂回黑话；

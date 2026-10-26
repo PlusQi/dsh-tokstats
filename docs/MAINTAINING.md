@@ -71,7 +71,7 @@ node scripts/render-screenshots.mjs --lang en   # → docs/assets/tokstats-en.pn
 
 （来自 DSH 本体，调整前先读）
 
-- **client bundle 按包名发现**：host 按 entry 的 `name` 解析 `<name>/package.json` 读 `dsh.client` 声明，整包服务 `exports["./client"]`。行 name 必须是裸包名 `dsh-plugins`；写成 `dsh-plugins/xxx` 子路径只剩 host 半边（dsh-web-app 的 `web-startup` 行就是这种 host-only 子路径用法）。
+- **client bundle 按包名发现**：host 按 entry 的 `name` 解析 `<name>/package.json` 读 `dsh.client` 声明，整包服务 `exports["./client"]`。**只有裸包名行进 client 图**；子路径行（`dsh-tokstats/<插件>`）只剩 host 半边（dsh-web-app 的 `web-startup` 行就是这种 host-only 子路径用法）。所以本包**恰好一行**保留裸包名当 client 锚点，其余行用子路径换各自的展示文案（见下文「展示元数据与运行时词典是两层」；PK-01）。
 - **client 模块图按包扁平**：一个包的 client 半边 = 一个模块节点，包内不能拆多文件（bundle factory 里的 `require` 只认模块表词，相对路径直接抛错）。所有插件共用 `lib/client.js` 单文件靠分段纪律维护，这是"无构建步骤"的边界。
 - **host 按行分 fiber，client 每包单 fiber**：patch 每行建一个 **host** fiber，`config.plugin` 是 host 侧分发键（dsh-base 的 `tool-subagent` / `tool-subagent-fork` 是同名多行参考）。本包 `lib/index.js` 的 `apply(ctx, config)` 按该键分发：纯 UI 插件的 host 半边为空（行即存在/禁用锚点），tokstats 的 host 聚合器宿主在 `tokstats` 行的 fiber 上（行禁用 = 统计停摆）。**client 侧** **`__DSH_BOOT__`** **每包只建一个条目且不传 config**（`dsh-client-modules` 按包名构建 boot graph），因此 `lib/client.js` 的 apply 无条件注册 `PLUGINS` 全部插件，靠组件数据不可用时返回 null 降级；客户端不存在"第二行再跑一遍 apply"，也不可能在客户端按 `config.plugin` 分发。host 半边额外受模块图约束：pnpm link 安装下插件真实路径不在宿主 node\_modules 树内，**npm 包 import 不可解析**——`lib/index.js` 只用 `node:` 内建 + `apply(ctx, config)` 参数，不 import cordis/zod 等运行时依赖。
 - **样式按插件分 tag**：每插件一个 `data-plugin-css="dsh-tokstats/<id>"` tag（`ensurePluginStyles` 幂等注入、随包 fiber 停止移除）；保持插件块独立颗粒度，日后单插件独立成包时连样式原样带走。
@@ -248,15 +248,16 @@ barePackageName(specifier)                        ← 必须是裸包名
 
 维护要点：
 
-- **宿主没有「按行」的显示名通道，一个包只能有一个标题——三行同名是设计上限，不是 bug**（2026-10-24 逐条复核，勿再当缺陷排查）：
-  - 标题只有一个来源：`readPluginMeta` 全 asar 仅**一处**调用（`dsh-app-boot/lib/index.js` 的 `metaOf` → `readPluginMeta`），入参是**包名**；
-  - 行 meta 也按包名取：`dsh-plugin-manager/lib/index.js` 的 `declaredRows` 里 `const meta = packages?.metaOf(row.name, base)`——`row.name` 是本行配置的模块名，即裸包名；
-  - 客户端行标题只读 `row.meta.title`（`dsh-client-ui-plugin-manager/lib/client.js` 的 `rowText`），**不存在** `row.label` / `row.title` 字段；
-  - 所以三行共用一份 `locale/zh.json`。要按行区分，只能拆成三个独立包（各自一个 `package.json`），代价是三条发布线 + 冻结项（投影 key / RPC 通道 / 存储域名）迁移，本包**不做**。
-  - **千万不要为此把行 `name` 改成子路径**（如 `dsh-tokstats/tokprev`）来蹭 `<specifier>/locale/en.json`：`client-modules` 的 `exactPackageSpecifier` 明确拒绝含 `/` 的标识符（`!specifier.includes("/")`），`locatePkgJson` 随即返回 `undefined`，该行**不进入 client 图 → 插件 UI 整块消失**。这正是 AGENTS.md 硬规则 1 的实物证据，guard L71 会直接拦。
+- **行级展示文案走 `<包名>/<插件>` 子路径（2026-10-26 起，PK-01）**：此前三行的 `name` 都是裸包名 `dsh-tokstats`，三行只能读同一份包级 `locale/`，于是插件页「包含的组件」里三行**标题与描述完全一样**（能区分的只有行内的灰色 `rowId` / 模块名）。现在改成两档：
+  - **恰好一行保留裸包名 `dsh-tokstats`**——它是 **client 锚点**。`dsh-client-modules` 的 `exactPackageSpecifier` 拒绝含 `/` 的行名，只有裸包名行进 client 图；零锚点时三个插件的 UI 整块消失且宿主不打印任何日志。锚点行（tokstats）显示包级文案。
+  - **其余行用子路径 `dsh-tokstats/<插件>`**——`readPluginMeta` 会读 `${name}/locale/en.json`，所以每行各自一份 `locale/<插件>/{en,zh}.json`，组件卡片显示自己的名称与描述。子路径行是 host-only；模块入口靠 `exports` 的 `"./<插件>": "./lib/index.js"`（同一个 `apply`，`config.plugin` 照旧分发），字典靠 `"./<插件>/locale/*.json"`。
+  - **锚点的代价必须记住**：禁用 tokstats 行 = 裸包名行没了 = client 图卸载，tokprev / promptopt 的浏览器 UI 一起消失（此前是「关 tokstats 只停统计」）。禁用子路径行只摘它自己的 host fiber。
+  - 四条会静默失效的错法都由 guard 拦：子路径行漏 `locale/<插件>/`、`exports` 漏 `"./<插件>"`、`exports` 漏 `"./<插件>/locale/*.json"`、子路径与 `config.plugin` 不同名（文案按 `name` 取、行为按 `config.plugin` 分发，错配时界面显示 A 而跑的是 B）。
+- **宿主没有「任意命名」的通道——一个包的每一行文案只能来自 `${row.name}/locale/en.json`**（2026-10-24 初查，2026-10-26 修正）：标题只有一个来源，`readPluginMeta` 全 asar 仅**一处**调用（`dsh-app-boot/lib/index.js` 的 `metaOf` → `readPluginMeta`），入参是行的 `name`；行 meta 也按它取（`dsh-plugin-manager/lib/index.js` 的 `declaredRows` 里 `const meta = packages?.metaOf(row.name, base)`）；客户端行标题只读 `row.meta.title`（`dsh-client-ui-plugin-manager/lib/client.js` 的 `rowText`），**不存在** `row.label` / `row.title` 字段。所以「任意给某行起名」做不到，能做到的是**用子路径换一份字典**——即上面的两档方案。
+- **不要为了省事把锚点行也改成子路径**：`exactPackageSpecifier` 的 `!specifier.includes("/")` 会把裸包名之外的标识符全部判为「非包根」，`locatePkgJson` 返回 `undefined`，该行**不进入 client 图**——插件 UI 整块消失，宿主不报错（只有浏览器控制台一条 `loaded without registering`）。guard 的「零锚点」检查就是这条的实物防线。
 - **只放 `meta.title` / `meta.description` 两个键**，别加 `meta.icon` 之类——`readPluginMeta` 不读它们，加了是死字段（guard 会给 WARN）。
 - **`meta.description` 与 `package.json.description` 是两回事**：前者是插件页/市场卡片上的一句人读简介（两个语言各一份），后者是 npm 元数据里的中文长句。宿主对包卡片用的是**前者**（`readPluginMeta`），`listBundles` 另有独立的 `description` 字段取自**后者**——两边措辞不必一致，也不必同步改。
-- **改完必须目检**：静态项只能证明「结构对」，证明不了「宿主真的加载了新元数据」。重启宿主（desktop profile 由 Electron 独占，要退出应用重开，不是关窗口）→ 设置 → 插件 → 看「已安装插件」卡片的标题与描述；切英文应变成 `locale/en.json` 的内容。`npm test` 与 guard 都覆盖不到这一步。
+- **改完必须目检**：静态项只能证明「结构对」，证明不了「宿主真的加载了新元数据」。重启宿主（desktop profile 由 Electron 独占，要退出应用重开，不是关窗口）→ 设置 → 插件 → 看「已安装插件」卡片的标题与描述，以及**展开后「包含的组件」三行各自的名字与描述**；切英文应变成 `locale/en.json` / `locale/<插件>/en.json` 的内容。`npm test` 与 guard 都覆盖不到这一步。
 - **`files` 只能用 `npm pack --dry-run --json` 验**：本机 `link:` 安装是 junction 直通仓库，`files` 白名单根本不生效，link 下永远看不出丢文件。
 
 

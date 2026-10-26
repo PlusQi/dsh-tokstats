@@ -1,29 +1,50 @@
-# dsh-plugins bundle patch: one row per plugin in this pack.
-# Every row keeps name 'dsh-plugins': the client half is discovered per
-# package name (a subpath name would load host-side only). Rows are host
-# fibers only - the client boot manifest creates ONE entry per package with
-# no config (dsh-client-modules keys its boot graph rows by package name),
-# so lib/client.js applies ALL plugins unconditionally and config.plugin is
-# a host-plane dispatch key (empty host half today; dsh-base's
-# tool-subagent rows are the same-name multi-row reference). Row ids are
-# pack-scoped and prefixed to never collide with dsh-base / dsh-web-app
-# builtin ids (patch layers override by id).
-# Per-profile disable: a row's `disabled: true` removes that row's host
-# fiber only - the client bundle stays (and still registers the disabled
-# plugin's UI) while ANY row of this pack is live. Disabling every row drops
-# the whole bundle; per-plugin client off-switches need a separate package:
-#   - id: tokprev
-#     disabled: true
+# dsh-tokstats bundle patch: one row per plugin in this pack.
+#
+# Row names are a two-tier scheme, and the reason is the host's ONLY per-row
+# display-text channel. `dsh-plugin-manager` builds each row as
+# `meta = pluginPackages.metaOf(row.name, base)` -> `dsh-app-boot`
+# `readPluginMeta(specifier)`, which reads `${specifier}/locale/en.json`
+# (`meta.title` / `meta.description`). The row's `name` is therefore BOTH the
+# Loader module specifier and the display-text key - there is no separate
+# `row.label` (the manager only projects `{ rowId, moduleName, entryId, meta }`).
+#
+#   - 'dsh-tokstats'          <- bare package name: the CLIENT ANCHOR. Only a
+#                                bare name enters the browser module graph
+#                                (`dsh-client-modules` `exactPackageSpecifier`
+#                                rejects any specifier containing '/'), so
+#                                exactly ONE row must keep it or the whole
+#                                client half disappears silently. It reads the
+#                                package-level locale/ (the pack's own copy).
+#   - 'dsh-tokstats/<plugin>' <- subpath rows: each reads its own
+#                                locale/<plugin>/{en,zh}.json, so every
+#                                component shows its own title and description
+#                                instead of three identical lines. These rows
+#                                are host-only; the subpaths live in exports
+#                                and resolve to the same lib/index.js, and
+#                                config.plugin still dispatches.
+#
+# Consequence of the anchor (documented in docs/INVARIANTS.md PK-01): the
+# client half stays loaded while ANY row is live, but the anchor row owns the
+# bare name - disabling the tokstats row drops the bare-name row, which
+# unloads the client graph and with it BOTH tokprev and promptopt UI. Disabling
+# the subpath rows only removes their own host fiber. Per-plugin client
+# off-switches still need a separate package.
+#
+# Rows are host fibers only - the client boot manifest creates ONE entry per
+# package with no config, so lib/client.js applies ALL plugins unconditionally
+# and config.plugin is a host-plane dispatch key. Row ids are pack-scoped and
+# prefixed to never collide with dsh-base / dsh-web-app builtin ids (patch
+# layers override by id).
 - insert:
-    # tokprev: composer 下一轮 token 预告行 + 每轮收尾真实消耗徽标
+    # tokprev: composer 下一轮 token 预告行（子路径行，读 locale/tokprev/）
     - id: tokprev
-      name: 'dsh-tokstats'
+      name: 'dsh-tokstats/tokprev'
       config:
         plugin: tokprev
     # tokstats: 侧栏列表项 + root `main` 全局面板（hook 已占 sidebar.footer.action，
     # 全局面板的正路是 main keyed slot + ctx.layout.selectPanel）。host 半边注册一个
     # per-session 投影单元：折叠结果由官方 session-projection-cache 持久化，本包不再
-    # 写任何自有存储文件。
+    # 写任何自有存储文件。**裸包名行（client 锚点），不要改成子路径。**
     #   windowDays: 折叠窗口天数（缺省 90）。超过窗口的明细被折进 epoch 合计，
     #               读取期排除并改计 epoch，原始明细不删（面板的「全部」档位仍可查）。
     - id: tokstats
@@ -31,11 +52,11 @@
       config:
         plugin: tokstats
         windowDays: 90
-    # promptopt: composer dock 的「优化提示词」按钮 + 原文/优化文对照弹层。
-    # 宿主半边注册 RPC 通道 /dsh-plugins.promptopt，走 ctx.llm 做一次旁路
-    # 模型调用（骑已注册的第一个 provider/model 路由，无配置面）。通道随本行
-    # fiber 卸载即摘，禁用本行即整链路下线。
+    # promptopt: composer dock 的「优化提示词」按钮 + 原文/优化文对照弹层（子路径行，
+    # 读 locale/promptopt/）。宿主半边注册 RPC 通道 /dsh-plugins.promptopt（历史名，
+    # 不随包名变），走 ctx.llm 做一次旁路模型调用（骑已注册的第一个 provider/model
+    # 路由，无配置面）。通道随本行 fiber 卸载即摘，禁用本行即整链路下线。
     - id: promptopt
-      name: 'dsh-tokstats'
+      name: 'dsh-tokstats/promptopt'
       config:
         plugin: promptopt
