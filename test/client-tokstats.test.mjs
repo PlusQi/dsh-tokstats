@@ -1671,9 +1671,18 @@ test("TS-23 / AC-4：柱宽有上限、列少时居中，列多时合并到 30 �
 	// 各写一遍就是错位的来源，这里按共用规则断言，防止哪天又拆回去。
 	const itemRule = css.match(/\.dsh-tokstats-trackItem\{([^}]*)\}/);
 	assert.ok(itemRule !== null, "共用轨道条目规则应存在");
-	assert.match(itemRule[1], /max-width:48px/, "列宽上限 48px（AC-4）");
+	// 宽度上限**分两级**（2026-10-26）：列上限决定整组能铺多开，柱身上限决定单根
+	// 柱多粗。原来两级都压在列上（48px），7 列时整组只有 348px，在 750px 的绘图区里
+	// 居中成一坨、两侧各空 200px——「量柱太紧凑、两侧留空」就是这么来的。
+	assert.match(itemRule[1], /max-width:96px/, "列宽上限 96px：让整组能铺开（AC-4）");
 	assert.match(itemRule[1], /flex:1/, "等分剩余宽度");
 	assert.match(itemRule[1], /min-width:3px/, "窄列下限");
+	// 真正限制「柱子别太粗」的是柱身：40px 上限 + 水平居中。空隙由「列宽 − 柱宽」
+	// 自然产生，不必去动和刻度槽共用的 2px 列间距（改它会破坏同轨对齐）。
+	const fillRule = css.match(/\.dsh-tokstats-barFill\{([^}]*)\}/);
+	assert.ok(fillRule !== null, "柱体规则应存在");
+	assert.match(fillRule[1], /max-width:40px/, "柱身自身上限 40px（柱子不该跟着列一起变粗）");
+	assert.match(fillRule[1], /margin:0 auto/, "柱身在列内水平居中（柱心对准刻度槽）");
 	const trackRule = css.match(/\.dsh-tokstats-track\{([^}]*)\}/);
 	assert.ok(trackRule !== null, "共用轨道容器规则应存在");
 	// 已知副作用：flex:1 + max-width 会让少列时整组挤在左侧。容器必须显式
