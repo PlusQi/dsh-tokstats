@@ -1915,6 +1915,48 @@ test("TS-32：面板有自己的数据色——取自宿主业务色（品牌蓝
 	}
 });
 
+test("TS-35：卡片「面」用 border-l2、「线」仍用 border-l1——亮色下卡与页同色时靠 l2 才分得开", () => {
+	// 失败模式：亮色主题里宿主 `bg-base` 与 `bg-layer-1` 都是纯白
+	// （`neutral-bluish-00`），卡片与页面底色**完全同色**，分层只剩边框一条路。
+	// 而 `--dsw-alias-border-l1` 亮色是 `#0000000a`（4% 黑），压在纯白上合成
+	// `#f5f5f5`，对比度 1.09:1——八块卡片连成一片，读者数不出有几张卡。
+	// l2 是 `#0000001a`（10% 黑）→ `#e5e5e5`，1.26:1，缝看得出来又不抢内容。
+	//
+	// 这条断言同时钉住**另一半**：分隔线不许跟着一起加粗。l1 的语义是
+	// 「一条线」（网格线、绘图区底边、页脚横线），l2 的语义是「一块面」；
+	// 全改成 l2 会让分隔线重到与卡片边框抢层级（页脚曾误用 l2，比卡片还实）。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+
+	// 三处「卡片面」：骨架卡 / KPI 卡 / 内容卡。骨架卡也要改——首屏骨架与
+	// 成品卡同圆角同边框是既有约定（跳版会闪一下），边框不同样跳版。
+	for (const [name, pattern] of [
+		["骨架卡", /\.dsh-tokstats-skCard\{([^}]*)\}/],
+		["KPI 卡", /\.dsh-tokstats-kpi\{([^}]*)\}/],
+		["内容卡", /\.dsh-tokstats-card\{([^}]*)\}/],
+	]) {
+		const rule = css.match(pattern);
+		assert.ok(rule !== null, `${name}规则应存在`);
+		assert.match(rule[1], /border:1px solid var\(--dsw-alias-border-l2\)/,
+			`${name}的面边框必须用 l2（亮色下 l1 只有 1.09:1，分不开卡与页）`);
+		assert.ok(!/border:1px solid var\(--dsw-alias-border-l1\)/.test(rule[1]),
+			`${name}不得退回 l1（亮色主题下卡与页同色，l1 等于没有边框）`);
+	}
+
+	// 三处「分隔线」仍用 l1，防止「一次改全」式的过度修正。
+	for (const [name, pattern] of [
+		["绘图区底边（0 刻度）", /\.dsh-tokstats-chartPlot\{([^}]*)\}/],
+		["网格线", /\.dsh-tokstats-gridLine\{([^}]*)\}/],
+		["页脚横线", /\.dsh-tokstats-foot\{([^}]*)\}/],
+	]) {
+		const rule = css.match(pattern);
+		assert.ok(rule !== null, `${name}规则应存在`);
+		assert.match(rule[1], /var\(--dsw-alias-border-l1\)/,
+			`${name}是「线」不是「面」，继续用 l1（加重会与卡片边框抢层级）`);
+	}
+});
+
 test("TS-17 / TS-23：词典新增键 zh/en 成对、无 provider / model 两词", () => {
 	const { dicts } = setupClient();
 	assertDictPair(assert, NS, dicts);
