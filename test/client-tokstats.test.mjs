@@ -832,7 +832,7 @@ test("每日柱：无 daily 字段时整卡不渲染（兼容旧 host 返回值�
 	assert.ok(textOf(tree).includes("趋势（按周）"), "其余卡片照常");
 });
 
-test("AC-6：热力图与日柱图并排同一行（pairGrid 等宽两列），另一张缺席时不占半行", async () => {
+test("AC-6：热力图与日柱图并排同一行（pairGrid 主图优先两列），另一张缺席时不占半行", async () => {
 	const rpc = makeRpcStub();
 	// 热力图要真实渲染（缺 heatDaily 时整卡不渲染），这里给两天有量的 84 天序列。
 	const heatDaily = makeHeatDaily([{ offset: -3, calls: 5 }, { offset: -2, calls: 12 }]);
@@ -851,14 +851,20 @@ test("AC-6：热力图与日柱图并排同一行（pairGrid 等宽两列），�
 	assert.equal(allTitles.filter((v) => v === "近 12 周用量").length, 1, "热力图卡只渲染一次");
 	assert.equal(allTitles.filter((v) => v === "每日调用量").length, 1, "日柱图卡只渲染一次");
 
-	// 样式：等宽两列 + 等高；窄窗折成单列。等宽是「两张卡都放得下」的前提，
-	// `stretch` 让较矮的柱图卡与热力图卡同高，两张卡的边框才能对齐。
+	// 样式：**主图优先**的两列 + 等高；窄窗折成单列。日柱图是主图（30 列时每列只有
+	// 9–13px，再窄就退化成一排竖线），热力图是索引图（格子有 24px 上限、整图封顶
+	// 310px，多给的宽度用不上），所以前者更宽——样稿也是 1.45:1。这里断言「第一列
+	// 严格宽于第二列」而不是钉死某个小数，标尺微调不该动测试，但「主副颠倒」必须拦。
 	injectedStyleTags.length = 0;
 	setupClient();
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
 	const pairRule = css.match(/\.dsh-tokstats-pairGrid\{([^}]*)\}/);
 	assert.ok(pairRule !== null, "并排栅格规则应存在");
-	assert.match(pairRule[1], /grid-template-columns:1fr 1fr/, "等宽两列");
+	const ratio = /grid-template-columns:([\d.]+)fr ([\d.]+)fr/.exec(pairRule[1]);
+	assert.ok(ratio !== null, "两列比必须写成 <n>fr <n>fr 的形式，实际 " + pairRule[1]);
+	assert.ok(Number(ratio[1]) > Number(ratio[2]),
+		`主图（日柱图，第一列）必须更宽，实际 ${ratio[1]}fr vs ${ratio[2]}fr`);
+	assert.ok(Number(ratio[2]) > 0, "第二列不得为 0（热力图不能消失）");
 	assert.match(pairRule[1], /align-items:stretch/, "两卡等高");
 	const breakpoint = css.match(/@media \(max-width:820px\)\{\.dsh-tokstats-pairGrid\{([^}]*)\}\}/);
 	assert.ok(breakpoint !== null, "窄窗需要折成单列的断点");
@@ -917,7 +923,15 @@ test("TS-31：下方是自适应两列——卡片保持自身高度，按估算
 	const columnRule = css.match(/\.dsh-tokstats-column\{([^}]*)\}/);
 	assert.ok(columnRule !== null, "列规则应存在");
 	assert.match(columnRule[1], /flex-direction:column/, "列内自上而下紧挨着排");
-	assert.match(columnRule[1], /gap:10px/, "卡片间距与整页一致");
+	// 间距**不绑死具体像素**：这条断言的本意是「卡片间距与整页栅格一致」，
+	// 写死 10px 会让标尺调整（SPEC §5.3 把间距统一成 12px）必须改测试，
+	// 而真正的回归——列内间距与栅格间距不相等——反而查不出来。
+	const gridRule = css.match(/\.dsh-tokstats-grid\{([^}]*)\}/);
+	assert.ok(gridRule !== null, "卡片栅格规则应存在");
+	const gridGap = /gap:(\d+px)/.exec(gridRule[1]);
+	assert.ok(gridGap !== null, "栅格规则应声明 gap");
+	assert.ok(columnRule[1].includes("gap:" + gridGap[1]),
+		`卡片间距应与整页栅格一致（${gridGap[1]}），实际 ${columnRule[1]}`);
 	const breakpoint = css.match(/@media \(max-width:820px\)\{\.dsh-tokstats-columns\{([^}]*)\}/);
 	assert.ok(breakpoint !== null, "窄窗需要折成单列");
 	assert.match(breakpoint[1], /flex-direction:column/, "窄窗单列");
@@ -1231,7 +1245,9 @@ test("TS-21：coverage 为空对象 / sessions 非数字时同样不渲染（降
 
 /** 「校验中」节点（缺失时 undefined，供反向断言用）。 */
 function verifyingNodeOf(tree) {
-	return nodesOf(tree).find((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-footVerifying");
+	// 校验态现在是一个**状态徽标**（颜色 + 圆点 + 文字），不再是页脚里一句灰字。
+	return nodesOf(tree).find((n) => typeof n.props.className === "string"
+		&& n.props.className.includes("dsh-tokstats-status-verifying"));
 }
 
 test("TS-24：verifying 为 true 时页脚显示「校验中」", async () => {
@@ -1240,8 +1256,11 @@ test("TS-24：verifying 为 true 时页脚显示「校验中」", async () => {
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
 	const node = verifyingNodeOf(tree);
-	assert.ok(node, "verifying=true 时必须有「校验中」提示");
-	assert.equal(textOf(node), "校验中…");
+	assert.ok(node, "verifying=true 时必须有校验态徽标");
+	assert.equal(textOf(node), "校验中", "校验态沿用原来的状态词「校验中」（不要另造词）");
+	// 颜色之外必须有形状线索：徽标里的圆点（SPEC §7 不允许只靠颜色编码）。
+	assert.ok(nodesOf(node).some((n) => n.props.className === "dsh-tokstats-statusDot"),
+		"校验态徽标必须带圆点（不能只靠颜色）");
 	// 过渡态提示不得挤掉页脚原有信息。
 	assert.match(textOf(footOf(tree)), /生成于 \d{2}:\d{2}:\d{2}/);
 });
@@ -1332,7 +1351,11 @@ test("TS-24：verifying 为 true 时自动重拉一次，收敛后停止", async
 
 /** 「统计中…」空态节点（出现即说明内容被卸载了）。 */
 function pendingNodeOf(tree) {
-	return nodesOf(tree).find((n) => typeof n.props.className === "string" && n.props.className === "dsh-tokstats-empty" && (textOf(n) || "").includes("统计中"));
+	// 「还没有数据」的等待态：首屏/主动切档后是**骨架**（`aria-busy` + sr-only 文案），
+	// 不再是原来那行「统计中…」文字块。判据跟着改，否则所有依赖它的用例会
+	// 假绿——它们断言的是「此时没有内容」，而骨架同样满足这一点。
+	return nodesOf(tree).find((n) => typeof n.props.className === "string"
+		&& n.props.className === "dsh-tokstats-skeleton" && n.props["aria-busy"] === "true");
 }
 
 /** KPI 卡的数值节点（存在即说明内容仍在屏上）。 */
@@ -1648,9 +1671,18 @@ test("TS-23 / AC-4：柱宽有上限、列少时居中，列多时合并到 30 �
 	// 各写一遍就是错位的来源，这里按共用规则断言，防止哪天又拆回去。
 	const itemRule = css.match(/\.dsh-tokstats-trackItem\{([^}]*)\}/);
 	assert.ok(itemRule !== null, "共用轨道条目规则应存在");
-	assert.match(itemRule[1], /max-width:48px/, "列宽上限 48px（AC-4）");
+	// 宽度上限**分两级**（2026-10-26）：列上限决定整组能铺多开，柱身上限决定单根
+	// 柱多粗。原来两级都压在列上（48px），7 列时整组只有 348px，在 750px 的绘图区里
+	// 居中成一坨、两侧各空 200px——「量柱太紧凑、两侧留空」就是这么来的。
+	assert.match(itemRule[1], /max-width:96px/, "列宽上限 96px：让整组能铺开（AC-4）");
 	assert.match(itemRule[1], /flex:1/, "等分剩余宽度");
 	assert.match(itemRule[1], /min-width:3px/, "窄列下限");
+	// 真正限制「柱子别太粗」的是柱身：40px 上限 + 水平居中。空隙由「列宽 − 柱宽」
+	// 自然产生，不必去动和刻度槽共用的 2px 列间距（改它会破坏同轨对齐）。
+	const fillRule = css.match(/\.dsh-tokstats-barFill\{([^}]*)\}/);
+	assert.ok(fillRule !== null, "柱体规则应存在");
+	assert.match(fillRule[1], /max-width:40px/, "柱身自身上限 40px（柱子不该跟着列一起变粗）");
+	assert.match(fillRule[1], /margin:0 auto/, "柱身在列内水平居中（柱心对准刻度槽）");
 	const trackRule = css.match(/\.dsh-tokstats-track\{([^}]*)\}/);
 	assert.ok(trackRule !== null, "共用轨道容器规则应存在");
 	// 已知副作用：flex:1 + max-width 会让少列时整组挤在左侧。容器必须显式
@@ -1806,36 +1838,56 @@ test("TS-17：输出副值在计费输入为 0 时给破折号，不编一个 0%
 	assert.equal(hints[2], "\u2014", `输入为 0 时输出副值应为破折号，实际 ${hints[2]}`);
 });
 
-test("AC-6：时间图行是唯一 1:1 双列（等高交给 stretch），下方已无固定双列栅格", () => {
+test("AC-6：时间图行是唯一的「主图优先」双列（等高交给 stretch），下方已无固定双列栅格", () => {
 	injectedStyleTags.length = 0;
 	setupClient();
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
 	const rule = css.match(/\.dsh-tokstats-pairGrid\{([^}]*)\}/);
 	assert.ok(rule !== null, "双列行规则应存在");
-	assert.match(rule[1], /grid-template-columns:1fr 1fr/, "时间图行 1:1（不再有 2fr 1fr）");
+	// 1.45:1 而不是 1:1（v0.8.0 的写法）：日柱图是主图、热力图是索引图，
+	// 详见 `lib/client.js` 里 `.pairGrid` 上方的取舍说明。这里只钉「第一列更宽」，
+	// 具体小数留给视觉标尺；`2fr 1fr` 那种 2:1 也不允许（热力图会窄到读不出五档）。
+	const ratio = /grid-template-columns:([\d.]+)fr ([\d.]+)fr/.exec(rule[1]);
+	assert.ok(ratio !== null, "两列比必须写成 <n>fr <n>fr 的形式，实际 " + rule[1]);
+	assert.ok(Number(ratio[1]) > Number(ratio[2]), "日柱图那一列必须更宽（主图优先）");
+	assert.ok(Number(ratio[1]) / Number(ratio[2]) < 2, "但不得宽到 2:1（热力图要留得住五档色阶）");
 	assert.match(rule[1], /align-items:stretch/, "同行卡片等高（AC-6）");
 	assert.ok(!/align-items:start/.test(rule[1]), "不得退回 start（会留出空洞）");
 	// 2:1 的第二套比例已删除：两套比例并存时每行栏线都不一样，整页像拼起来的。
 	assert.ok(!/\.dsh-tokstats-rowGrid\{/.test(css), "不得残留 2:1 行规则");
 });
 
-test("AC-7：选中态用数据色实心 + 挖空文字（不是与容器底只差几级的 bg-layer-2）", () => {
+test("AC-7：选中态由数据色派生（软底 + accent 派生文字 + inset 描边），不是与容器底只差几级的 bg-layer-2", () => {
 	injectedStyleTags.length = 0;
 	setupClient();
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
 	const rule = css.match(/\.dsh-tokstats-switchOn\{([^}]*)\}/);
 	assert.ok(rule !== null, "选中态规则应存在");
-	// 第五批起选中态与图表共用 `--dsh-tokstats-accent`（品牌蓝）：brand-primary 在
-	// 暗色里近白、亮色里近黑，选中项看起来只是一个「白色小方块」，且与数据区
-	// 完全不同的颜色语言。
-	assert.match(rule[1], /background:var\(--dsh-tokstats-accent\)/, "选中态用数据色底（AC-7）");
-	assert.match(rule[1], /color:var\(--dsh-tokstats-on-accent\)/, "配挖空文字保证可读");
-	assert.ok(!/bg-layer-2/.test(rule[1]), "不得退回 bg-layer-2（实测只差 9 级灰度）");
-	// hover 规则必须紧跟：`.switch:hover` 的特异性高于 `.switchOn` 这个单类，
-	// 不补 `.switchOn:hover` 时鼠标停在选中项上会把数据色底覆盖回灰。
+	// 底色由 `--dsh-tokstats-accent` 与卡片底混合而成（TS-32 的色彩契约不变，
+	// 只是把 accent 的「量」从实心 100% 降到 18%）：实心 accent 会和 KPI 主值、
+	// 柱体抢同一档注意力，而工具条在阅读顺序上排在数据之后。
+	assert.match(rule[1],
+		/background:color-mix\(in srgb,var\(--dsh-tokstats-accent\) \d+%,var\(--dsw-alias-bg-layer-1\)\)/,
+		"选中态底色由 accent 与卡片底混合（软底，仍追溯得到 accent）");
+	assert.ok(!/background:var\(--dsh-tokstats-accent\)/.test(rule[1]),
+		"不得退回实心 accent 底（会与主值 / 柱体抢注意力）");
+	// 文字必须仍是 accent 派生的蓝。混入 `label-primary` 不是为了好看：纯 accent 压在
+	// 18% 淡蓝底上，亮色只有约 3.2:1，12px 文字要求 4.5:1；混主题主文字色后两侧
+	// 分别到 5.6:1 / 6.2:1，且色相不变。
+	assert.match(rule[1],
+		/color:color-mix\(in srgb,var\(--dsh-tokstats-accent\) \d+%,var\(--dsw-alias-label-primary\)\)/,
+		"选中态文字由 accent 与主题主文字色混合（保证 12px 对比度）");
+	// 1px 描边走 inset：border 会把按钮撑高 2px，32px 的控件高度当场破掉。
+	assert.match(rule[1], /box-shadow:inset 0 0 0 1px/, "描边必须是 inset（border 会撑高控件）");
+	// 不得退回纯 `bg-layer-2` 单色：实测它与容器底只差 9 级灰度，选中项根本看不出来。
+	assert.ok(!/background:var\(--dsw-alias-bg-layer-2\)/.test(rule[1]),
+		"不得退回 bg-layer-2 单色（实测只差 9 级灰度）");
+	// hover 必须紧跟：`.switch:hover` 的特异性高于 `.switchOn` 这个单类，
+	// 不补 `.switchOn:hover` 时鼠标停在选中项上会把软底覆盖回 hover 灰。
 	const hoverRule = css.match(/\.dsh-tokstats-switchOn:hover\{([^}]*)\}/);
 	assert.ok(hoverRule !== null, "选中态 hover 规则应存在（否则悬停时选中态消失）");
-	assert.match(hoverRule[1], /background:var\(--dsh-tokstats-accent\)/);
+	assert.match(hoverRule[1], /background:color-mix\(in srgb,var\(--dsh-tokstats-accent\)/,
+		"hover 保持 accent 派生软底");
 });
 
 test("TS-32：面板有自己的数据色——取自宿主业务色（品牌蓝），不是零色相的 brand-primary", () => {
@@ -2640,4 +2692,113 @@ test("TS-29：单日模式下工作区过滤器与 day 叠加（两个过滤器�
 	const last = summaries[summaries.length - 1];
 	assert.equal(last.payload.day, fixture.target, "单日模式仍带 day");
 	assert.equal(last.payload.workspace, "D:\\proj\\alpha", "工作区过滤器仍生效（两个过滤器叠加）");
+});
+
+test("VR-AC-07：焦点环与减少动效（SPEC §7）——2px outline + 2px 外偏移，且尊重 reduced-motion", () => {
+	// 这两条此前是漏项：规则表里有「控件高度 32px」，却没有「焦点长什么样」。
+	// 失败模式很隐蔽——键盘用户 Tab 到档位按钮时，界面上没有任何变化。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+
+	// 用 :focus-visible 而不是 :focus：后者鼠标点击也会亮环。
+	const focusRule = css.match(/\.dsh-tokstats-page :focus-visible\{([^}]*)\}/);
+	assert.ok(focusRule !== null, "面板内必须有 :focus-visible 规则（键盘用户要看得见焦点）");
+	assert.match(focusRule[1], /outline:2px solid var\(--dsw-focus-ring-color,var\(--dsh-tokstats-accent\)\)/,
+		"焦点环 2px，颜色跟随宿主 focus ring（缺该 token 时回落 accent）");
+	// 外偏移是必需的：热力格最档本身就是 accent，环贴边等于没有。
+	assert.match(focusRule[1], /outline-offset:2px/, "焦点环必须外偏移 2px（否则压在 accent 格上不可见）");
+	// outline 不占布局——用 border 会改变控件尺寸、把 12 列挤变形。
+	assert.ok(!/border:.*focus/.test(focusRule[1]), "焦点不得用 border 实现");
+
+	// 减少动效：刷新按钮的旋转是面板里唯一持续动画。
+	assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{/, "必须有 prefers-reduced-motion 块");
+	assert.match(css, /\.dsh-tokstats-refreshBusy svg\{animation:none\}/,
+		"系统开启「减少动效」时必须停掉刷新图标的旋转");
+	assert.match(css, /\.dsh-tokstats-status-verifying \.dsh-tokstats-statusDot\{animation:none\}/,
+		"校验中徽标的脉冲同样要停（前庭敏感读者）");
+});
+
+test("VR：首屏骨架与空态下一步（对应样稿 LOADING / EMPTY）", async () => {
+	// 加载态原来是「统计中…」一行，加载完整页铺开就是跳版；空态则是死路一条。
+	// 这条同时钉住：骨架不泄露数字（灰块里没有值）、空态的按钮真的会扩到「全部」。
+	const zero = { calls: 0, in: 0, cr: 0, cw: 0, out: 0 };
+	const rpcPending = makeRpcStub();
+	rpcPending.respond(() => new Promise(() => {}));
+	const pending = setupClient({ rpc: rpcPending });
+	const pendingTree = await renderPanel(pending.react, pending.main, { t: pending.t });
+	assert.ok(pendingNodeOf(pendingTree) !== undefined, "首屏必须是骨架（aria-busy）");
+	assert.equal(kpiValueNodeOf(pendingTree), undefined, "骨架里不得出现真实数字");
+	assert.ok(textOf(pendingTree).includes("统计中"), "「统计中…」仍要对屏幕阅读器可见");
+
+	const rpcEmpty = makeRpcStub();
+	rpcEmpty.respond(() => ({
+		ok: true,
+		value: makeSummary({
+			buckets: Array.from({ length: 6 }, () => zero),
+			daily: [],
+			weekly: [],
+			workspaces: [],
+			routes: [],
+			heatDaily: [],
+			totals: zero,
+		}),
+	}));
+	const empty = setupClient({ rpc: rpcEmpty });
+	const tree = await renderPanel(empty.react, empty.main, { t: empty.t });
+	const action = nodesOf(tree).find((n) => n.props.className === "dsh-tokstats-emptyAction");
+	assert.ok(action, "空态必须给出下一步（样稿：空态有明确行动）");
+	assert.equal(textOf(action), "查看全部时间");
+
+	// 点它 → 下一次请求的 windowDays 必须是 0（「全部」档），而不是停留原窗口。
+	empty.react.reset();
+	action.props.onClick();
+	empty.react.runEffects();
+	empty.react.reset();
+	renderDeep(empty.react, empty.main.comp({ t: empty.t }));
+	empty.react.runEffects();
+	await new Promise((r) => setImmediate(r));
+	const summaries = rpcEmpty.calls.filter((call) => call.endpoint === "summary");
+	const last = summaries[summaries.length - 1];
+	assert.equal(last.payload.windowDays, 0, "空态的下一步应把档位切到「全部」");
+
+	// 样式：骨架、仅屏幕阅读器可见的文案、零日内框都在。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	assert.match(css, /\.dsh-tokstats-srOnly\{[^}]*clip:rect\(0 0 0 0\)/, "必须有仅屏幕阅读器可见的文案类");
+	assert.match(css, /\.dsh-tokstats-skCard\{[^}]*border-radius:10px/, "骨架卡与成品卡同圆角（不跳版）");
+	const zeroRule = css.match(/\.dsh-tokstats-heatCell:not\(\[data-level\]\)[^{]*\{([^}]*)\}/);
+	assert.ok(zeroRule !== null, "零日格需要单独的规则（形状辅助颜色）");
+	assert.match(zeroRule[1], /box-shadow:inset 0 0 0 1px/, "零日格用 1px 内框而不是只靠明度差");
+	assert.match(zeroRule[1], /color-mix\(in srgb,var\(--dsw-alias-label-primary\)/, "内框颜色来自宿主 token");
+});
+
+test("VR-AC-05：三种状态徽标各自取宿主语义色（成功 / 警告 / 错误），不写死色值", () => {
+	// 样稿的状态徽标是绿 / 琥珀 / 红三色。这里钉住「颜色来自宿主的 state token」，
+	// 否则面板里的绿会跟宿主别处的绿不是同一支色，换主题还得再改一次代码。
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	for (const [state, token] of [
+		["done", "success"],
+		["verifying", "warn"],
+		["failed", "error"],
+	]) {
+		const rule = css.match(new RegExp("\\.dsh-tokstats-status-" + state + "\\{([^}]*)\\}"));
+		assert.ok(rule !== null, `${state} 状态徽标规则应存在`);
+		assert.match(rule[1], new RegExp("color:color-mix\\(in srgb,var\\(--dsw-alias-state-" + token + "-primary"),
+			`${state} 的前景色必须由 --dsw-alias-state-${token}-primary 派生`);
+		assert.match(rule[1], /55%,var\(--dsw-alias-label-primary\)/,
+			`${state} 的文字色必须混入 label-primary（否则亮色主题对比度不足）`);
+		assert.match(rule[1], new RegExp("background:color-mix\\(in srgb,var\\(--dsw-alias-state-" + token + "-primary\\)"),
+			`${state} 的底是同一状态色的淡染`);
+		assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(rule[1]), `${state} 不得写死十六进制色`);
+	}
+	// 校验中必须有动态效果（圆点脉冲），且减少动效时停掉。
+	assert.match(css, /\.dsh-tokstats-status-verifying \.dsh-tokstats-statusDot\{animation:dsh-tokstats-pulse/,
+		"校验中圆点必须脉冲（动态表示「仍在算」）");
+	assert.match(css, /@keyframes dsh-tokstats-pulse\{/, "脉冲关键帧应存在");
+	assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{[\s\S]*?\.dsh-tokstats-statusDot\{animation:none\}/,
+		"减少动效时必须停掉脉冲");
 });

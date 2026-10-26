@@ -214,6 +214,8 @@ const THEME_DARK = `
   --dsw-alias-border-l3:#ffffff29; --dsw-alias-label-primary:#f9fafb; --dsw-alias-label-secondary:#cfd3d6;
   --dsw-alias-label-tertiary:#adb2b8; --dsw-alias-label-primary-inverted:#353638; --dsw-alias-brand-primary:#f9fafb;
   --dsw-alias-state-business-primary:#7aaaff; --dsw-alias-interactive-bg-hover:#ffffff14;
+  --dsw-alias-state-success-primary:#22c55e; --dsw-alias-state-warn-primary:#f59e0b;
+  --dsw-alias-state-error-primary:#f25a5a;
   --dsw-alias-button-elevated-fill:#43454a;
 `;
 const THEME_LIGHT = `
@@ -222,6 +224,8 @@ const THEME_LIGHT = `
   --dsw-alias-border-l3:#00000029; --dsw-alias-label-primary:#0f1115; --dsw-alias-label-secondary:#61666b;
   --dsw-alias-label-tertiary:#81858c; --dsw-alias-label-primary-inverted:#ffffff; --dsw-alias-brand-primary:#0f1115;
   --dsw-alias-state-business-primary:#4176e6; --dsw-alias-interactive-bg-hover:#2631480f;
+  --dsw-alias-state-success-primary:#22c55e; --dsw-alias-state-warn-primary:#f59e0b;
+  --dsw-alias-state-error-primary:#ec1313;
   --dsw-alias-button-elevated-fill:#ffffff;
 `;
 const page = "<!doctype html><html lang=\"" + lang + "\"><head><meta charset=\"utf-8\"><style>"
