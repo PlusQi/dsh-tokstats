@@ -13,6 +13,19 @@
 
 ### Changed
 
+- **tokstats 的详细简介铺到 README、`package.json` 与市场条目草案**（2026-10-27）：`locale/*.json` 里那句「用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，外加工作区与模型排行」原先只出现在宿主插件页，读者在仓库首屏与市场卡片上读到的是压缩版。本次按「同一事实、不同长度」分四层铺（分工表见 `docs/MAINTAINING.md`「简介文案的四层分工」）：
+  - **README 中英**：组件表的 tokstats 格与该节首句都换成完整句；首句顺带按截图里的真实版式重排（顶部四卡 → 每日调用量 + 热力图 → 上下文长度分布 / 按周趋势 / 两个排行 → 提示词整理使用情况），旧句「中间两张时间图，下面四个排行」与面板实际布局对不上——热力图在右上、排行分两列。
+  - **`package.json` 的 `description`**：改为「tokstats 详细句 + 另两个组件一句尾巴」。它描述的是**整包**，只在检索里露头，砍掉尾巴会让 tokprev / promptopt 失去发现入口。
+  - **市场卡片仍需 PR**：目录条目 YAML 的 `description.{en,zh}` 是手写字段，本仓库改不到。提案文本：
+
+    ```yaml
+    description:
+      en: 'Cross-session stats on where your tokens went: four headline figures, context length distribution, a 12-week heatmap and weekly trend, plus workspace and model rankings - with a next-turn token forecast and draft restructure alongside.'
+      zh: '跨会话统计 token 都花在哪儿了：用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，工作区与模型排行；另附发送前 token 预告与口语草稿整理。'
+    ```
+
+    提 PR 的仓库是 `awesome-dsh-plugin/awesome-dsh-plugin`，文件 `data/plugins/PlusQi__dsh-tokstats.yml`；中国区读 npm 快照、滞后 1–2 天，见维护文档「卡片文案与截图会滞后」。
+
 - **插件页组件行改为「Token 用量统计」，描述收敛成 tokstats 自己的功能，并把该组件提到第一位**（2026-10-27，**取代**下面「三个组件各一句」那条对 `locale/*.json` 的处置）：组件的名称与描述只走 `${row.name}/locale/en.json` 这一条通道（`readPluginMeta`），而 tokstats 那行恰好是裸包名 **client 锚点**，它读的就是**包级** `locale/{zh,en}.json`——这份文案同时也是插件页顶部**包卡片**的标题与简介。所以三处一次动：
   - `locale/{zh,en}.json` 的 `meta.title` 由「Token 用量工具箱 / Token Usage Kit」改为「**Token 用量统计** / **Token Usage Stats**」，与侧栏面板名对齐（`panel.title` 早就是这个名），组件行与包卡片同显；
   - `meta.description` 由「三个组件各一句」改为**只讲 tokstats**：四项用量指标、上下文长度分布、近 12 周热力图与按周趋势、工作区与模型排行。理由与上一条正相反：这一行描述的是**一个组件**，混进 tokprev / promptopt 的功能会让人以为它们在这个组件里；包整体的介绍由 README 首屏的组件表承担。

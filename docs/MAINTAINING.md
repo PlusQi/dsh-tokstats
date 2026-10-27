@@ -288,11 +288,20 @@ barePackageName(specifier)                        ← 必须是裸包名
 | 卡上元素 | 数据源 | 生效路径 |
 | --- | --- | --- |
 | 简介文案 | 目录仓库 `awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/PlusQi__dsh-tokstats.yml` 的 `description.{en,zh}`（**手写字段**） | 提 PR 精确替换，合并后站点重建即换。**本仓库改不到它**——`locale/*.json` 的 `meta.description` 只影响宿主插件页，见下条 |
-
-**两句简介为什么不一样长**：`locale/*.json` 与 `package.json` 的 description 是**三个组件各一句**（统计 / 预告 / 整理），因为插件页与市场卡片那一行字下面没有任何表格，读者只能读到这一句；README 首句只写「这是什么插件」，因为它紧跟着一张组件表，表里三行与那三句同义，首句再列一遍等于同一件事读两遍。**改任一处都要看另一处**：把 README 首句换成三项并列，或把 description 砍成一句，都会让读者在同一个页面上读到重复或缺项。
 | 截图顺序与内容 | 本仓库 `screenshots.json`（1–8 张；2026-10-27 起是 `raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/…?v=<日期>` 的**绝对 URL**；目录 nightly 构建重读，raw HEAD 直出） | **推仓库即生效，不用 PR**——但**只有改了 URL 才真的生效**，见下条；不声明则市场退回抽 README 图 |
 | 图标 | 条目 YAML 的 `icon:` 指向包内 `docs/assets/icon-180.png`（只收 GitHub 托管位图，约 96px 方形显示） | 换文件即生效 |
 | 「宿主要求未知」chip | 市场只对**有条目 `npm` 字段**的插件去查宿主要求：`client.js` 的 `compatibility = typeof p.npm === "string" ? hostCompatibility[p.npm] : void 0`，`npm` 为 `null` 时直接渲染「宿主要求未知」。而 `npm` 由目录的 `scripts/probe-npm.mjs` 写进 `data/npm-map.json`——**只有发布到 registry、且 registry 里 `repository` 指回本仓库的包**才会被映射；条目 schema 本身没有 engines 字段 | 仓库侧无解，**且已裁决不做**（见下条「chip 保持未知」）；理论解是发 npm，或等目录 schema 支持 engines |
+
+#### 简介文案的四层分工（2026-10-27 重排）
+
+| 层 | 谁读 | 当前措辞 | 为什么是这个长度 |
+| --- | --- | --- | --- |
+| `locale/{zh,en}.json` 的 `meta.description` | 宿主「设置 → 插件」页，**包卡片与 tokstats 组件行共用** | **只讲 tokstats**：四项用量指标、上下文长度分布、近 12 周热力图与按周趋势、工作区与模型排行 | 组件行描述的是**一个组件**；混进 tokprev / promptopt 的功能会让人以为它们在这个组件里（见 PK-01：包卡片只能与锚点行同源） |
+| `package.json` 的 `description` | npm 元数据 + 宿主 `listBundles` | **tokstats 详细句 + 另两个组件一句尾巴** | 它描述的是**整包**，砍掉尾巴会让 tokprev / promptopt 在检索与列表里失去入口 |
+| 目录条目 YAML 的 `description.{en,zh}` | 市场卡片（需 PR 到 `awesome-dsh-plugin`） | 与 `package.json` 同构（tokstats 详细句 + 尾巴） | 卡片那一行下面没有任何表格，读者只能读到这一句，必须把「是什么 + 还有什么」在一句里讲完 |
+| README 首句 | 仓库首屏 | 只写「这是什么插件」，紧跟组件表 | 表里三行已经把三个组件讲全，首句再列一遍是同一件事读两遍 |
+
+**改任一层都要看其余三层**：把某层单独换成「三项并列」或砍成一句，会在对应页面上出现重复或缺项。
 
 #### 卡片文案与截图会滞后 1–2 天：中国区读的是 npm 快照，不是官网（2026-10-27 实测）
 

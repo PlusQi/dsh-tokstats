@@ -13,7 +13,7 @@ A possibly useful [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepse
 
 | Component | What it is for | Where you see it |
 | --- | --- | --- |
-| **tokstats** | Cross-session statistics on where the tokens went | "Token usage stats" in the sidebar → a full panel |
+| **tokstats** | Cross-session stats on where your tokens went: four headline figures, context length distribution, a 12-week heatmap and weekly trend, plus workspace and model rankings | "Token usage stats" in the sidebar → a full panel |
 | **tokprev** | Tells you roughly how many tokens the next turn will feed in, before you send | One grey line at the bottom of the input box |
 | **promptopt** | Turns a spoken draft into a structured prompt | Star button at the right end of the toolbar under the input box |
 
@@ -23,7 +23,7 @@ Installation is [further down](#install).
 
 ![tokstats panel (sample data)](./docs/assets/tokstats-en.png)
 
-How many tokens were spent, and who spent them? "Token usage stats" in the sidebar opens a full panel — four metric cards on top, two time charts in the middle, four rankings below.
+How many tokens were spent, and who spent them? "Token usage stats" in the sidebar opens a full panel — four headline figures on top, daily calls and the 12-week heatmap in the middle, then context length distribution, the weekly trend, workspace and model rankings, and finally prompt restructure usage.
 
 | Block | What it answers |
 | --- | --- |
