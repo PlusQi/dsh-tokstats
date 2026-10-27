@@ -331,7 +331,9 @@ weserv 返回 `Cache-Control: public, max-age=31536000`，缓存键是**「编�
 
 - 收录事实（2026-10-25 核验）：条目 `PlusQi/dsh-tokstats`，`added 2026-10-23`，category `usage`，安装命令 `github:PlusQi/dsh-tokstats`（未固定 ref，默认分支最新）。另一家目录 dshpluginhub.ai 的收录停留在旧名 `dsh-plugins` + pre-rename commit，**勿以它为准**。
 - **官方目录徽章**（2026-10-27 追加）：`https://awesome-dsh-plugin.com/badge.svg`，168×20 静态 SVG，目录站 README 的 `## Badge` 段公开的那一枚，挂在中英 README 顶部 `<p align="center">` 行末。**它不校验任何东西**——服务端不按仓库区分（`?repo=` / `?u=` 都返回同样的 610 字节），所以「被收录」是自述，真伪靠目录在册事实（上一条）。目录审核规则里**没有**「必须挂徽章」这一条，是否挂纯属作者选择；同页那枚插件总数徽章（`img.shields.io/endpoint?url=…/count.json`）不采用，总数不属于这个插件。
-- 截图序按「首屏不出现同屏重复」排：tokprev → tokstats 全图 → promptopt → 各英文版。原顺序首屏是中/英两张近乎相同的竖图，白费一轮播位；卡片首屏只展示前两张。
+- **截图序：tokstats 打头**（2026-10-27 裁决，此前是 tokprev 打头）。理由三件事叠在一起：① 卡片首屏只有 **3 格**（`CARD_SHOT_LIMIT = 3`，每格 `132×88`、`object-fit: contain`），首格决定这张卡第一眼是什么；② tokstats 是三个组件里唯一**有面板实体**的（另外两个是输入框旁的一行字和一个小弹层），缩到 132×88 仍认得出是一块统计面板；③ 它的读音/记忆点最直接对应包名 `dsh-tokstats`。顺序为 **tokstats → tokprev → promptopt → 各自英文版**（英文版整体后置，首屏不出现同屏重复）。
+  - **代价必须知道**：tokstats 是**竖向图**（1536×1864，比例 0.82），塞进 132×88 的横向格子后 `contain` 只用到中间约 46px 宽的一条，两侧留灰底。tokprev 是 1826×348（5.25）、promptopt 是 2088×617（3.38），两者在横格里填满得多。**视觉上「谁更好看」是 tokprev，语义上「谁更像这个插件」是 tokstats**——本次裁决取后者，因为卡片标题就是 `dsh-tokstats`，首图与标题对得上比铺满率更值。
+  - 想两者兼得只能换图：给 tokstats 出一张**横向裁切版**（只放四张 KPI 卡那一行，约 3:1）专供卡片首格，全图留在第 2 位。这条路要改 `render-screenshots.mjs` 加一个 `--crop` 模式与夹具，没做。
 - 面板类插件用**单张全图**（2026-10-26 维护者裁决：一张完整面板 > 「总览 + 详情」两张横图）。全图的高度预算靠渲染夹具的行数控制——`render-screenshots.mjs` 的模型排行 6 条，双列贪心随行数重排；行数越多底边越低、比例越竖，在市场卡片里越糊。
 - 可选大招（未做，2026-10-27 复核后仍搁置）：打 GitHub Release 预构建 tarball + 条目加 `tarball:` 字段，市场优先展示它、免 `allowBuilds` 警告；发 npm 则连 engines chip 一起解掉。
 

@@ -13,6 +13,10 @@
 
 ### Changed
 
+- **市场卡片的截图序改为 tokstats 打头**（2026-10-27 裁决）：`tokstats → tokprev → promptopt → 各自英文版`。卡片首屏只有 3 格（`CARD_SHOT_LIMIT = 3`，每格 `132×88` `contain`），首格决定这张卡第一眼是什么；tokstats 是唯一有「面板实体」的组件，且与包名 `dsh-tokstats` 直接对应。
+  - **代价写明**：tokstats 是竖向图（1536×1864，比例 0.82），在 132×88 的横格里 `contain` 后只用到中间约 46px 宽的一条、两侧留灰底；tokprev（5.25）与 promptopt（3.38）在横格里填满得多。本次取「首图与标题对得上」而非「铺满率」。
+  - 想两者兼得需给 tokstats 另出一张横向裁切版专供卡片首格（全图留第 2 位），那要改 `render-screenshots.mjs` 加 `--crop` 模式与夹具，**未做**。
+
 - **插件页与 npm 元数据的简介改成「三个组件各一句」**（2026-10-27）。维护者给的版本是**三项并列**：跨会话统计 token 都花在哪儿了 / 发送前告诉你这一轮大概要喂多少 token / 把口语草稿整理成结构化提示词。落到 `locale/{zh,en}.json` 的 `meta.description`（宿主「设置 → 插件」页显示的那句）与 `package.json` 的 `description`（npm 元数据与宿主 `listBundles`）。
   - **README 首句保持短句、不换成这一版**：README 紧跟一张组件表，三行「有什么用」与这三句一字不差，首句再说一遍就是同一件事读两遍。两者的差别是**有没有组件表**——插件页与市场卡片那一行字下面什么都没有，所以必须把三项讲全；README 有表，所以首句只负责「这是什么插件」。
   - **市场卡片上仍是旧文案，这是预期内的**：卡片文案的源是目录条目 YAML 的手写字段 `description.{en,zh}`（见 `docs/MAINTAINING.md` 的市场卡片数据源表），**改本仓库影响不到它**，需另提 PR 到 `awesome-dsh-plugin`。目下线上卡片显示「DSH 的 token 工具集：下一轮 token 预告、基于宿主会话投影单元的跨会话用量分析面板……」，正是那条 YAML 的内容。
