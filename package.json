@@ -1,7 +1,7 @@
 {
   "name": "dsh-tokstats",
   "version": "0.9.0",
-  "description": "dsh token 用量插件：跨会话统计 token 都花在哪儿了——用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势、工作区与模型排行；另附发送前 token 预告与口语草稿整理。",
+  "description": "可能有用的 DSH token 用量插件，跨会话统计 token 都花在哪儿了：用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，工作区与模型排行；另附有发送前 token 预告和输入草稿优化功能。",
   "type": "module",
   "main": "lib/index.js",
   "icon": "icon.svg",

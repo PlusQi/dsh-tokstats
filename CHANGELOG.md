@@ -18,13 +18,15 @@
 - **tokstats 的详细简介铺到 README、`package.json` 与市场条目草案**（2026-10-27）：`locale/*.json` 里那句「用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，外加工作区与模型排行」原先只出现在宿主插件页，读者在仓库首屏与市场卡片上读到的是压缩版。本次按「同一事实、不同长度」分四层铺（分工表见 `docs/MAINTAINING.md`「简介文案的四层分工」）：
   - **README 中英**：组件表的 tokstats 格与该节首句都换成完整句；首句顺带按截图里的真实版式重排（顶部四卡 → 每日调用量 + 热力图 → 上下文长度分布 / 按周趋势 / 两个排行 → 提示词整理使用情况），旧句「中间两张时间图，下面四个排行」与面板实际布局对不上——热力图在右上、排行分两列。
   - **`package.json` 的 `description`**：改为「tokstats 详细句 + 另两个组件一句尾巴」。它描述的是**整包**，只在检索里露头，砍掉尾巴会让 tokprev / promptopt 失去发现入口。
-  - **市场卡片仍需 PR**：目录条目 YAML 的 `description.{en,zh}` 是手写字段，本仓库改不到。提案文本：
+  - **市场卡片仍需 PR**：目录条目 YAML 的 `description.{en,zh}` 是手写字段，本仓库改不到。提案文本（维护者 2026-10-27 定稿，以「可能有用的 …」开篇、末句用「**功能**」而不是「组件」——市场卡片讲的是这个包提供什么能力，不是它内部有几个部件）：
 
     ```yaml
     description:
-      en: 'Cross-session stats on where your tokens went: four headline figures, context length distribution, a 12-week heatmap and weekly trend, plus workspace and model rankings - with a next-turn token forecast and draft restructure alongside.'
-      zh: '跨会话统计 token 都花在哪儿了：用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，工作区与模型排行；另附发送前 token 预告与口语草稿整理。'
+      en: 'A possibly useful DSH token usage plugin: cross-session stats on where your tokens went - four headline figures, context length distribution, a 12-week heatmap and weekly trend, plus workspace and model rankings; it also ships a next-turn token forecast and a draft-optimization feature.'
+      zh: '可能有用的 DSH token 用量插件，跨会话统计 token 都花在哪儿了：用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，工作区与模型排行；另附有发送前 token 预告和输入草稿优化功能。'
     ```
+
+    **长度与截断已核对**：zh 106 字 / en 285 字符。目录 7211 条条目的 zh 简介中位数 82 字、p90 169 字，本句在正常区间；卡片正文 `-webkit-line-clamp:5`（`12px/18px`，双列栅格）约容 135 字，不触发截断，真超了也有展开按钮，不会切在半句上。
 
     提 PR 的仓库是 `awesome-dsh-plugin/awesome-dsh-plugin`，文件 `data/plugins/PlusQi__dsh-tokstats.yml`；中国区读 npm 快照、滞后 1–2 天，见维护文档「卡片文案与截图会滞后」。
 

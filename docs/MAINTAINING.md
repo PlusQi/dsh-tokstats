@@ -297,8 +297,8 @@ barePackageName(specifier)                        ← 必须是裸包名
 | 层 | 谁读 | 当前措辞 | 为什么是这个长度 |
 | --- | --- | --- | --- |
 | `locale/{zh,en}.json` 的 `meta.description` | 宿主「设置 → 插件」页，**包卡片与 tokstats 组件行共用** | **只讲 tokstats**：四项用量指标、上下文长度分布、近 12 周热力图与按周趋势、工作区与模型排行 | 组件行描述的是**一个组件**；混进 tokprev / promptopt 的功能会让人以为它们在这个组件里（见 PK-01：包卡片只能与锚点行同源） |
-| `package.json` 的 `description` | npm 元数据 + 宿主 `listBundles` | **tokstats 详细句 + 另两个组件一句尾巴** | 它描述的是**整包**，砍掉尾巴会让 tokprev / promptopt 在检索与列表里失去入口 |
-| 目录条目 YAML 的 `description.{en,zh}` | 市场卡片（需 PR 到 `awesome-dsh-plugin`） | 与 `package.json` 同构（tokstats 详细句 + 尾巴） | 卡片那一行下面没有任何表格，读者只能读到这一句，必须把「是什么 + 还有什么」在一句里讲完 |
+| `package.json` 的 `description` | npm 元数据 + 宿主 `listBundles` | 与目录条目**一字不差**（「可能有用的 DSH token 用量插件，…；另附有 … 功能」） | 它描述的是**整包**，砍掉尾巴会让 tokprev / promptopt 在检索与列表里失去入口；两层同源是怕爬虫重新生成目录摘要时把黑话漂回去 |
+| 目录条目 YAML 的 `description.{en,zh}` | 市场卡片（需 PR 到 `awesome-dsh-plugin`） | 同 `package.json` | 卡片那一行下面没有任何表格，读者只能读到这一句，必须把「是什么 + 还有什么」在一句里讲完；正文 `-webkit-line-clamp:5` 约容 135 字，zh 定稿 106 字不触发截断 |
 | README 首句 | 仓库首屏 | 只写「这是什么插件」，紧跟组件表 | 表里三行已经把三个组件讲全，首句再列一遍是同一件事读两遍 |
 
 **改任一层都要看其余三层**：把某层单独换成「三项并列」或砍成一句，会在对应页面上出现重复或缺项。
