@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token Usage Kit",
-    "description": "See where your tokens go: cross-session usage stats with model and workspace breakdowns, plus a next-turn forecast."
+    "description": "Cross-session statistics on where your tokens went, a pre-send forecast of the next turn's input, and spoken drafts restructured into structured prompts."
   }
 }

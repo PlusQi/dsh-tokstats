@@ -40,11 +40,11 @@ git tag -a vX.Y.Z -m "vX.Y.Z：<一句话摘要>"; git push origin refs/tags/vX.
 `lib/` + `icon.svg` + `cordis.patch.yml` + `locale/` + `screenshots.json` + `docs/assets/` 下的截图与位图店招（README 嵌图与市场卡片图，**漏了则打包形态下 README 图片断链、市场卡片丢图**）+ `AGENTS.md` / `CHANGELOG.md` / `docs/MAINTAINING.md` / `docs/INVARIANTS.md`（README / LICENSE / package.json 由打包器自动附带，不必列）。
 `icon.svg` **必须**在 `files` 里：`package.json` 的 `icon` 指向它，宿主按包内相对路径读成 data URL 内联；漏了只会在插件元数据里留一条 `meta.error`，界面表现是「没有图标」而不是报错。
 
-**本包只从 GitHub 分发**：不要在任何文档里写「从 npm 装 `dsh-plugins`」——npm 上那个名字是别人的包，见下节「分发与元数据纪律」。
+**本包只从 GitHub 分发**：不要在任何文档里写「从 npm 装 `dsh-plugins`」——npm 上那个名字是别人的包，见下节「分发与元数据纪律」。「不发 npm」已在 2026-10-27 明确裁决，理由与重新评估条件见「chip 保持『宿主要求未知』」一节——想发 npm 之前先读那节，别重新论证一遍。
 
 **`docs/INVARIANTS.md` 必须进包**：AGENTS.md 的路由表指向它，包内若缺这份文件，装包者拿到的就是一张指空的必读清单。同理，AGENTS.md 里不得再引用 `docs/specs/`（本地 gitignored，不随包分发）——需要引证据时引 `docs/INVARIANTS.md` 的行号。
 
-`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：包内 `README*.md` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则装包后 README 的效果图断链。**2026-10-27 起 `screenshots.json`（给市场的那份）与 README 的地址不再同源**：前者是带 `?v=` 的绝对 URL，后者仍是相对路径——这是刻意的，别为了「统一」把 README 改成绝对 URL，那样包内插图就依赖网络了（原因见「卡片缩略图不吃内容更新」）。六个文件合计约 640 KB（其中 tokstats 两张约 320 KB，`--dpr 1.6` 出的宽 1536、高随内容），是包体增长的主要来源；若日后要瘦身，优先考虑撤掉 `files` 里的六条（此时包内 README 插图会断链，需同时改成绝对 URL）。
+`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：包内 `README*.md` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则装包后 README 的效果图断链。**2026-10-27 起 `screenshots.json`（给市场的那份）与 README 的地址不再同源**：前者是带 `?v=` 的绝对 URL，后者仍是相对路径——这是刻意的，别为了「统一」把 README 改成绝对 URL，那样包内插图就依赖网络了（原因见下节「卡片缩略图不吃内容更新」）。六个文件合计约 640 KB（其中 tokstats 两张约 320 KB，`--dpr 1.6` 出的宽 1536、高随内容），是包体增长的主要来源；若日后要瘦身，优先考虑撤掉 `files` 里的六条（此时包内 README 插图会断链，需同时改成绝对 URL）。
 
 **截图必须跟着界面改，不能长期复用**：v0.7.1 之前 README 用的是 v0.6.0 前后的图，图里还画着三档时间窗、7 个 2 的幂桶和已删除的每轮徽标——读者照着旧图找界面会以为装错了版本。改 `.dsh-tokstats-switch` 档位、桶边界、或删掉某个 slot 时，**同批重截对应截图**；判据是「图里的每一处文案都能在 `lib/client.js` 的词典里找到」。
 
@@ -286,10 +286,32 @@ barePackageName(specifier)                        ← 必须是裸包名
 
 | 卡上元素 | 数据源 | 生效路径 |
 | --- | --- | --- |
-| 简介文案 | 目录仓库 `awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/PlusQi__dsh-tokstats.yml` 的 `description.{en,zh}`（**手写字段**） | 提 PR 精确替换，合并后站点重建即换 |
+| 简介文案 | 目录仓库 `awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/PlusQi__dsh-tokstats.yml` 的 `description.{en,zh}`（**手写字段**） | 提 PR 精确替换，合并后站点重建即换。**本仓库改不到它**——`locale/*.json` 的 `meta.description` 只影响宿主插件页，见下条 |
+
+**两句简介为什么不一样长**：`locale/*.json` 与 `package.json` 的 description 是**三个组件各一句**（统计 / 预告 / 整理），因为插件页与市场卡片那一行字下面没有任何表格，读者只能读到这一句；README 首句只写「这是什么插件」，因为它紧跟着一张组件表，表里三行与那三句同义，首句再列一遍等于同一件事读两遍。**改任一处都要看另一处**：把 README 首句换成三项并列，或把 description 砍成一句，都会让读者在同一个页面上读到重复或缺项。
 | 截图顺序与内容 | 本仓库 `screenshots.json`（1–8 张；2026-10-27 起是 `raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/…?v=<日期>` 的**绝对 URL**；目录 nightly 构建重读，raw HEAD 直出） | **推仓库即生效，不用 PR**——但**只有改了 URL 才真的生效**，见下条；不声明则市场退回抽 README 图 |
 | 图标 | 条目 YAML 的 `icon:` 指向包内 `docs/assets/icon-180.png`（只收 GitHub 托管位图，约 96px 方形显示） | 换文件即生效 |
-| 「宿主要求未知」chip | 市场读目录条目的 engines 信息，而条目 schema 没有该字段——`package.json` 的 `engines.dsh` 不会被采集 | 仓库侧无解；发 npm（registry manifest 天然带 engines）或找目录维护者 |
+| 「宿主要求未知」chip | 市场只对**有条目 `npm` 字段**的插件去查宿主要求：`client.js` 的 `compatibility = typeof p.npm === "string" ? hostCompatibility[p.npm] : void 0`，`npm` 为 `null` 时直接渲染「宿主要求未知」。而 `npm` 由目录的 `scripts/probe-npm.mjs` 写进 `data/npm-map.json`——**只有发布到 registry、且 registry 里 `repository` 指回本仓库的包**才会被映射；条目 schema 本身没有 engines 字段 | 仓库侧无解，**且已裁决不做**（见下条「chip 保持未知」）；理论解是发 npm，或等目录 schema 支持 engines |
+
+#### 卡片文案与截图会滞后 1–2 天：中国区读的是 npm 快照，不是官网（2026-10-27 实测）
+
+`dshmarket` 的目录有两条源，顺序在中国区是**先 npm 包、后官网**（`regions.js` 的 `catalog` 数组）：
+
+| 区 | 源顺序 |
+| --- | --- |
+| `global` | 只有 `https://awesome-dsh-plugin.com/plugins.json` |
+| `china` | ① `npm:dsh-plugin-catalog`（腾讯 npm 镜像）② 官网 `plugins.json` |
+
+所以中国区（本机 `state.json` 的 `region` 就是 `china`）**优先读 npm 上的 `dsh-plugin-catalog` 包**，只有当它失败时才回落到官网。实测（2026-10-27 上午）：
+
+```
+npm  dsh-plugin-catalog@2026.1026.10371  内容 updated=2026-10-25  ← 旧文案
+官网 plugins.json                         内容 updated=2026-10-26  ← 新文案
+```
+
+**判别方法**：拿卡片上那句话去比对两处 —— 与 npm 快照一致而与官网不一致，就说明读的是快照，等它重新发布即可，**不是自己改漏了**。目录的 `probe-*` 系列把结果打成 npm 包，发布节奏比站点构建慢一到两天。
+
+这条对维护的含义：目录侧改动（文案 PR、截图重抓）合并后，**别指望当天在卡片上看到**；反过来排查「为什么卡片没变」时，先确认是「源没更新」还是「自己推的东西没生效」——两件事的修法完全不同。
 
 #### 卡片缩略图不吃内容更新：同名重截必须换 URL（2026-10-27 踩坑）
 
@@ -308,9 +330,26 @@ weserv 返回 `Cache-Control: public, max-age=31536000`，缓存键是**「编�
 顺带一条已知代价：`screenshots.json` 走绝对 URL 后，**打包形态下的市场卡片图依赖网络**，与 `files` 里那六张图无关了；`files` 保留它们是为了包内 README 的插图（见「分发与元数据纪律」首段）。
 
 - 收录事实（2026-10-25 核验）：条目 `PlusQi/dsh-tokstats`，`added 2026-10-23`，category `usage`，安装命令 `github:PlusQi/dsh-tokstats`（未固定 ref，默认分支最新）。另一家目录 dshpluginhub.ai 的收录停留在旧名 `dsh-plugins` + pre-rename commit，**勿以它为准**。
+- **官方目录徽章**（2026-10-27 追加）：`https://awesome-dsh-plugin.com/badge.svg`，168×20 静态 SVG，目录站 README 的 `## Badge` 段公开的那一枚，挂在中英 README 顶部 `<p align="center">` 行末。**它不校验任何东西**——服务端不按仓库区分（`?repo=` / `?u=` 都返回同样的 610 字节），所以「被收录」是自述，真伪靠目录在册事实（上一条）。目录审核规则里**没有**「必须挂徽章」这一条，是否挂纯属作者选择；同页那枚插件总数徽章（`img.shields.io/endpoint?url=…/count.json`）不采用，总数不属于这个插件。
 - 截图序按「首屏不出现同屏重复」排：tokprev → tokstats 全图 → promptopt → 各英文版。原顺序首屏是中/英两张近乎相同的竖图，白费一轮播位；卡片首屏只展示前两张。
 - 面板类插件用**单张全图**（2026-10-26 维护者裁决：一张完整面板 > 「总览 + 详情」两张横图）。全图的高度预算靠渲染夹具的行数控制——`render-screenshots.mjs` 的模型排行 6 条，双列贪心随行数重排；行数越多底边越低、比例越竖，在市场卡片里越糊。
-- 可选大招（未做）：打 GitHub Release 预构建 tarball + 条目加 `tarball:` 字段，市场优先展示它、免 `allowBuilds` 警告；发 npm 则连 engines chip 一起解掉。两者都动「不发 registry」的既定发布线，需维护者裁决。
+- 可选大招（未做，2026-10-27 复核后仍搁置）：打 GitHub Release 预构建 tarball + 条目加 `tarball:` 字段，市场优先展示它、免 `allowBuilds` 警告；发 npm 则连 engines chip 一起解掉。
+
+#### chip 保持「宿主要求未知」：现阶段不发 npm（2026-10-27 裁决）
+
+**裁决：本包现阶段不发布到任何 registry，「宿主要求未知」这个 chip 就让它留着。**
+
+判定链已经查到底，没有任何仓库侧的绕法：市场只对 `typeof p.npm === "string"` 的条目去查宿主要求，而条目的 `npm` 只由目录的 `probe-npm.mjs` 从 **registry** 反查得到——条目 schema 没有 engines 字段，`package.json` 的 `engines.dsh` 在 GitHub 分发下**永远不被采集**。也就是说，这个 chip 的正确性完全取决于「是否上 npm」，不是一个可以靠改元数据修好的显示问题。
+
+不做 npm 的理由（写下来是为了下次不必重新论证）：
+
+- **收益只有这一个 chip**。已核过的连带好处是 downloads 排序与 `allowBuilds` 警告，都不影响安装与运行；插件规模上，为一行描述性标签引入第二条发布线（每个版本要 `git push` + `npm publish` 两处同步、`latest` dist-tag 与 `master` 会漂移）不划算。
+- **npm 发布不可真正撤销**：72 小时内可 unpublish，之后只能 deprecate。首次发布前要把本机路径、示例数据逐项核一遍，这是一次性的高注意力成本，而它的唯一产出仍然只是那个 chip。
+- **chip 的文案本身是诚实的**：它说「宿主要求未知」，而事实就是「条目没有声明宿主要求」，不像写成「兼容」那样误导人。真正需要挡住的是**读者以为插件不支持当前宿主**——这件事由 README 的「出问题了」第 1 条回答（跑 `dsh plugin --profile web list` 看 `is incompatible with dsh …`），并在同一段显式写了一句「那个 chip 不是故障」。README 不维护版本表（见「分发与元数据纪律」：使用者侧只说明「版本不匹配时插件会静默消失」），所以别在这里许诺一张不存在的表。
+
+**重新评估的触发条件**（满足任一条再谈 npm）：① 用户反馈集中在这个 chip 引起误解；② 目录 schema 支持 engines 字段但需要 npm 侧数据；③ 本包要按插件拆成多个包分发（那时 registry 的版本解析本身就变成刚需）；④ 发布线已经需要 `latest` 语义（例如要支持「只升补丁版」的更新策略）。
+
+**不要做的替代方案**：为了让 chip 有值而在目录条目里伪造 `npm` 字段（指向不存在的包）——`probe-npm` 会把它写回 `null`，且安装命令会跟着变成 registry 地址、直接装不上；这条比 chip 空着糟得多。
 
 ## 维护须知
 
