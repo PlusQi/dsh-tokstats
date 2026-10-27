@@ -650,8 +650,7 @@ test("TS-33：日柱图跟随档位、但窗口不少于 7 天（当日档仍画
 	const cardNoteOf = (root) => {
 		const card = nodesOf(root).find((n) => typeof n.props.className === "string"
 			&& n.props.className === "dsh-tokstats-card" && textOf(n).startsWith("每日调用量"));
-		const extra = nodesOf(card).find((n) => n.props.className === "dsh-tokstats-cardExtra");
-		return textOf(extra);
+		return textOf(nodesOf(card).find((n) => hasClass(n, "dsh-tokstats-cardRange")));
 	};
 	const switchTo = async (label) => {
 		react.reset();
@@ -853,7 +852,7 @@ test("AC-6：热力图与日柱图并排同一行（pairGrid 主图优先两列�
 
 	// 样式：**主图优先**的两列 + 等高；窄窗折成单列。日柱图是主图（30 列时每列只有
 	// 9–13px，再窄就退化成一排竖线），热力图是索引图（格子有 24px 上限、整图封顶
-	// 310px，多给的宽度用不上），所以前者更宽——样稿也是 1.45:1。这里断言「第一列
+	// 310px，多给的宽度用不上），所以前者更宽——2026-10-27 宽屏目检后取 1.7:1。这里断言「第一列
 	// 严格宽于第二列」而不是钉死某个小数，标尺微调不该动测试，但「主副颠倒」必须拦。
 	injectedStyleTags.length = 0;
 	setupClient();
@@ -1844,7 +1843,7 @@ test("AC-6：时间图行是唯一的「主图优先」双列（等高交给 str
 	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
 	const rule = css.match(/\.dsh-tokstats-pairGrid\{([^}]*)\}/);
 	assert.ok(rule !== null, "双列行规则应存在");
-	// 1.45:1 而不是 1:1（v0.8.0 的写法）：日柱图是主图、热力图是索引图，
+	// 1.7:1 而不是 1:1（v0.8.0 的写法）：日柱图是主图、热力图是索引图，
 	// 详见 `lib/client.js` 里 `.pairGrid` 上方的取舍说明。这里只钉「第一列更宽」，
 	// 具体小数留给视觉标尺；`2fr 1fr` 那种 2:1 也不允许（热力图会窄到读不出五档）。
 	const ratio = /grid-template-columns:([\d.]+)fr ([\d.]+)fr/.exec(rule[1]);
@@ -1855,6 +1854,46 @@ test("AC-6：时间图行是唯一的「主图优先」双列（等高交给 str
 	assert.ok(!/align-items:start/.test(rule[1]), "不得退回 start（会留出空洞）");
 	// 2:1 的第二套比例已删除：两套比例并存时每行栏线都不一样，整页像拼起来的。
 	assert.ok(!/\.dsh-tokstats-rowGrid\{/.test(css), "不得残留 2:1 行规则");
+});
+
+test("TS-36：热力图坐标与卡头读图信息分层，范围与结论保留完整 tooltip", async () => {
+	injectedStyleTags.length = 0;
+	setupClient();
+	const css = injectedStyleTags.find((tag) => tag.dataset.pluginCss === "dsh-tokstats/tokstats").textContent;
+	for (const selector of ["heatWeeks", "heatDows"]) {
+		const rule = css.match(new RegExp("\\.dsh-tokstats-" + selector + "\\{([^}]*)\\}"));
+		assert.ok(rule !== null, selector + " 坐标规则应存在");
+		assert.match(rule[1], /font-size:11px;line-height:16px/, selector + " 坐标用 11/16，不再压成 10px");
+	}
+	const shared = css.match(/\.dsh-tokstats-cardRange,\.dsh-tokstats-cardExtra\{([^}]*)\}/);
+	assert.ok(shared !== null, "范围与结论共享读图信息层级");
+	assert.match(shared[1], /color:var\(--dsw-alias-label-secondary\)/);
+	assert.match(shared[1], /font-size:12px;line-height:18px/);
+	const aside = css.match(/\.dsh-tokstats-cardAside\{([^}]*)\}/);
+	assert.ok(aside !== null, "范围与结论必须组成同一个右侧信息组");
+	assert.match(aside[1], /margin-left:auto/);
+	assert.match(aside[1], /display:flex/);
+	const peak = css.match(/\.dsh-tokstats-barPeak\{([^}]*)\}/);
+	assert.match(peak[1], /font-size:10px;line-height:12px/, "柱内标签受柱宽约束，保留 10/12");
+
+	const rpc = makeRpcStub();
+	rpc.respond(() => ({ ok: true, value: makeSummary({ windowDays: 1 }) }));
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const daily = nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-card")
+		&& textOf(n).startsWith("每日调用量"));
+	const range = nodesOf(daily).find((n) => hasClass(n, "dsh-tokstats-cardRange"));
+	const extra = nodesOf(daily).find((n) => hasClass(n, "dsh-tokstats-cardExtra"));
+	assert.match(textOf(range), /^近 7 天|^Last 7 days$/, "当日档明确标出图的实际固定范围");
+	assert.equal(range.props.title, textOf(range), "范围省略后有完整 tooltip");
+	assert.ok(textOf(extra).includes("峰值"), "峰值结论独立于范围渲染");
+	assert.equal(extra.props.title, textOf(extra), "结论省略后有完整 tooltip");
+	const separator = nodesOf(daily).find((n) => hasClass(n, "dsh-tokstats-cardSeparator"));
+	assert.ok(separator !== undefined, "范围与结论之间有分隔符");
+	const asideNode = nodesOf(daily).find((n) => hasClass(n, "dsh-tokstats-cardAside"));
+	assert.deepEqual(asideNode.children.filter((n) => typeof n === "object").map((n) => n.props.className),
+		["dsh-tokstats-cardRange", "dsh-tokstats-cardSeparator", "dsh-tokstats-cardExtra"],
+		"范围与结论在 DOM 中同组、相邻，不被布局拆散");
 });
 
 test("AC-7：选中态由数据色派生（软底 + accent 派生文字 + inset 描边），不是与容器底只差几级的 bg-layer-2", () => {
