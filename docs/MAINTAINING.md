@@ -44,7 +44,7 @@ git tag -a vX.Y.Z -m "vX.Y.Z：<一句话摘要>"; git push origin refs/tags/vX.
 
 **`docs/INVARIANTS.md` 必须进包**：AGENTS.md 的路由表指向它，包内若缺这份文件，装包者拿到的就是一张指空的必读清单。同理，AGENTS.md 里不得再引用 `docs/specs/`（本地 gitignored，不随包分发）——需要引证据时引 `docs/INVARIANTS.md` 的行号。
 
-`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：`screenshots.json` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则市场详情页拿到的是死链。它们也让包内 README 的效果图可见。六个文件合计约 640 KB（其中 tokstats 两张约 320 KB，`--dpr 1.6` 出的宽 1536、高随内容），是包体增长的主要来源；若日后要瘦身，优先考虑改用 GitHub 绝对 URL 并撤掉 `files` 里的六条（`npm pack --dry-run --json` 可复核实际体积）。
+`docs/assets/` 的六张截图**现在进包**（v0.7.0 起；promptopt 两张为后续新增）：包内 `README*.md` 用**相对路径**引用它们，而相对路径在打包形态下必须能找到文件，否则装包后 README 的效果图断链。**2026-10-27 起 `screenshots.json`（给市场的那份）与 README 的地址不再同源**：前者是带 `?v=` 的绝对 URL，后者仍是相对路径——这是刻意的，别为了「统一」把 README 改成绝对 URL，那样包内插图就依赖网络了（原因见「卡片缩略图不吃内容更新」）。六个文件合计约 640 KB（其中 tokstats 两张约 320 KB，`--dpr 1.6` 出的宽 1536、高随内容），是包体增长的主要来源；若日后要瘦身，优先考虑撤掉 `files` 里的六条（此时包内 README 插图会断链，需同时改成绝对 URL）。
 
 **截图必须跟着界面改，不能长期复用**：v0.7.1 之前 README 用的是 v0.6.0 前后的图，图里还画着三档时间窗、7 个 2 的幂桶和已删除的每轮徽标——读者照着旧图找界面会以为装错了版本。改 `.dsh-tokstats-switch` 档位、桶边界、或删掉某个 slot 时，**同批重截对应截图**；判据是「图里的每一处文案都能在 `lib/client.js` 的词典里找到」。
 
@@ -54,6 +54,8 @@ tokstats 的两张图由 `scripts/render-screenshots.mjs` 生成，**不再从�
 node scripts/render-screenshots.mjs --lang zh --theme light   # → docs/assets/tokstats.png
 node scripts/render-screenshots.mjs --lang en --theme light   # → docs/assets/tokstats-en.png
 ```
+
+出图后**还要抬 `screenshots.json` 六条地址的 `?v=<当天日期>`**——脚本只覆盖文件字节，不改 URL，而市场卡片缩略图按 URL 缓存（见「卡片缩略图不吃内容更新」）。
 
 - **进包的这两张是亮色主题**（2026-10-26 裁决）：市场详情页与 README 的背景是白底，暗色面板图贴在白底上是一块黑，缩略到卡片尺寸后「面板感」过重；亮色版与宿主默认（`body` = 亮色）一致，也更容易看清排印层级。**脚本的默认主题仍是暗色**（`--theme` 缺省 `dark`），所以**必须显式带 `--theme light`**，漏了就会把暗色图覆盖进仓库——两套主题都要像素级看过时，用 `--out /tmp/x.png` 出对照图，别直接覆盖。
 - **亮色可读性由 TS-35 兜住**：宿主亮色里 `bg-base` 与 `bg-layer-1` 同为纯白，卡片分层全靠边框；卡面用 l2、分隔线用 l1。换主题或调边框前先看 [docs/INVARIANTS.md](./INVARIANTS.md) 的 TS-35，`npm test` 有对应断言。
@@ -285,9 +287,25 @@ barePackageName(specifier)                        ← 必须是裸包名
 | 卡上元素 | 数据源 | 生效路径 |
 | --- | --- | --- |
 | 简介文案 | 目录仓库 `awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/PlusQi__dsh-tokstats.yml` 的 `description.{en,zh}`（**手写字段**） | 提 PR 精确替换，合并后站点重建即换 |
-| 截图顺序与内容 | 本仓库 `screenshots.json`（1–8 张相对路径；目录 nightly 构建重读，raw HEAD 直出） | **推仓库即生效，不用 PR**；不声明则市场退回抽 README 图 |
+| 截图顺序与内容 | 本仓库 `screenshots.json`（1–8 张；2026-10-27 起是 `raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/…?v=<日期>` 的**绝对 URL**；目录 nightly 构建重读，raw HEAD 直出） | **推仓库即生效，不用 PR**——但**只有改了 URL 才真的生效**，见下条；不声明则市场退回抽 README 图 |
 | 图标 | 条目 YAML 的 `icon:` 指向包内 `docs/assets/icon-180.png`（只收 GitHub 托管位图，约 96px 方形显示） | 换文件即生效 |
 | 「宿主要求未知」chip | 市场读目录条目的 engines 信息，而条目 schema 没有该字段——`package.json` 的 `engines.dsh` 不会被采集 | 仓库侧无解；发 npm（registry manifest 天然带 engines）或找目录维护者 |
+
+#### 卡片缩略图不吃内容更新：同名重截必须换 URL（2026-10-27 踩坑）
+
+市场卡片与详情大图请求的是**两条不同的链路**（`dshmarket@1.66.45` 的 `client.js`）：
+
+| 位置 | 地址 | 代码 |
+| --- | --- | --- |
+| 网格卡片缩略图 | `https://images.weserv.nl/?url=<encode(源 URL)>&h=200&fit=inside&we=1` | `thumbUrl(src, 200)` |
+| 详情弹层横向条 | 同一个 weserv 代理，`h=300` | `thumbUrl(src, 300)` |
+| 点开的大图（lightbox） | **源地址直连，不经代理** | `src: shots[index]` |
+
+weserv 返回 `Cache-Control: public, max-age=31536000`，缓存键是**「编码后的源 URL + 尺寸参数」**，**完全不看源文件内容**。所以「重截同名文件」只会让大图新、卡片旧——症状正是「预览图是旧版，点进去是新的」。实测判别信号是响应头 `X-Upstream-Response-Length`：它若等于**上一版**的字节数，这条边缘缓存就是换图前的。
+
+结论是硬规则：**每次重截 `docs/assets/` 下被 `screenshots.json` 引用的图，同批把 `?v=` 抬到当天日期**（六条一起抬，省得下次再猜哪张漏了）。`&clearcache=1` 不可靠——实测第一次能取到新图、下一次请求又回到旧字节。文件改名也能换 key，但要同步 README 两处与 `package.json` 的 `files`，不如抬 `?v=` 划算。
+
+顺带一条已知代价：`screenshots.json` 走绝对 URL 后，**打包形态下的市场卡片图依赖网络**，与 `files` 里那六张图无关了；`files` 保留它们是为了包内 README 的插图（见「分发与元数据纪律」首段）。
 
 - 收录事实（2026-10-25 核验）：条目 `PlusQi/dsh-tokstats`，`added 2026-10-23`，category `usage`，安装命令 `github:PlusQi/dsh-tokstats`（未固定 ref，默认分支最新）。另一家目录 dshpluginhub.ai 的收录停留在旧名 `dsh-plugins` + pre-rename commit，**勿以它为准**。
 - 截图序按「首屏不出现同屏重复」排：tokprev → tokstats 全图 → promptopt → 各英文版。原顺序首屏是中/英两张近乎相同的竖图，白费一轮播位；卡片首屏只展示前两张。

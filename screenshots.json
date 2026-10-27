@@ -1,10 +1,10 @@
 {
   "screenshots": [
-    "docs/assets/tokprev.png",
-    "docs/assets/tokstats.png",
-    "docs/assets/promptopt.png",
-    "docs/assets/tokprev-en.png",
-    "docs/assets/tokstats-en.png",
-    "docs/assets/promptopt-en.png"
+    "https://raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/docs/assets/tokprev.png?v=20261027",
+    "https://raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/docs/assets/tokstats.png?v=20261027",
+    "https://raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/docs/assets/promptopt.png?v=20261027",
+    "https://raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/docs/assets/tokprev-en.png?v=20261027",
+    "https://raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/docs/assets/tokstats-en.png?v=20261027",
+    "https://raw.githubusercontent.com/PlusQi/dsh-tokstats/HEAD/docs/assets/promptopt-en.png?v=20261027"
   ]
 }

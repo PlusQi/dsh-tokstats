@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **市场卡片缩略图停在旧版**：卡片缩略图与详情弹层横向条都经 `images.weserv.nl` 代理，该服务对缩图结果返回 `Cache-Control: public, max-age=31536000`，缓存键是「编码后的源 URL + 尺寸参数」——**不看源文件内容**。所以 10-26 把 `docs/assets/tokstats*.png` 换成浅色主题后，文件名没变的那两条在 `h=200`（卡片用的尺寸）上一直命中换图前的边缘缓存，而点开的大图走源地址直连、是新图，症状即「卡片预览旧、点进去新」。六张逐一核对后只有 `tokstats.png` / `tokstats-en.png` 命中陈旧缓存（其余 `h=200` 与 cache-bust 后字节一致）。
+  - **修法**：`screenshots.json` 六条改为 `raw.githubusercontent.com/…?v=<日期>` 的绝对 URL。市场侧 `safeScreenshots` 只要求 https + 四个 GitHub 域，查询串合法；`thumbUrl` 把整串编码进 `url=`，key 变了就取到新图。**以后每次重截都要抬 `?v=`**。
+  - `&clearcache=1` 实测不可靠（第一次新、下一次又回到旧字节），不假设「清缓存能解决」，只认换 URL。
+  - `docs/MAINTAINING.md` 新增「卡片缩略图不吃内容更新」一节，记录缓存键、`X-Upstream-Response-Length` 判别法与「重截必须抬 `?v=`」这条硬规则；`render-screenshots.mjs` 的用法段同步补一句。
+
 ## [0.9.0] - 2026-10-26
 
 > **状态**：本段对应 tag `v0.9.0`。此后未发布内容重新挂回 `[Unreleased]` 段。
