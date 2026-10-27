@@ -268,10 +268,11 @@ barePackageName(specifier)                        ← 必须是裸包名
 维护要点：
 
 - **行级展示文案走 `<包名>/<插件>` 子路径（2026-10-26 起，PK-01）**：此前三行的 `name` 都是裸包名 `dsh-tokstats`，三行只能读同一份包级 `locale/`，于是插件页「包含的组件」里三行**标题与描述完全一样**（能区分的只有行内的灰色 `rowId` / 模块名）。现在改成两档：
-  - **恰好一行保留裸包名 `dsh-tokstats`**——它是 **client 锚点**。`dsh-client-modules` 的 `exactPackageSpecifier` 拒绝含 `/` 的行名，只有裸包名行进 client 图；零锚点时三个插件的 UI 整块消失且宿主不打印任何日志。锚点行（tokstats）显示包级文案。
+  - **恰好一行保留裸包名 `dsh-tokstats`**——它是 **client 锚点**。`dsh-client-modules` 的 `exactPackageSpecifier` 拒绝含 `/` 的行名，只有裸包名行进 client 图；零锚点时三个插件的 UI 整块消失且宿主不打印任何日志。锚点行就是 tokstats 那一行，它读**包级** `locale/{zh,en}.json`（包卡片与本行共用这一份，所以标题写的是 `Token 用量统计` / `Token Usage Stats`，即这一个组件的名字，而不是包的总称）。
   - **其余行用子路径 `dsh-tokstats/<插件>`**——`readPluginMeta` 会读 `${name}/locale/en.json`，所以每行各自一份 `locale/<插件>/{en,zh}.json`，组件卡片显示自己的名称与描述。子路径行是 host-only；模块入口靠 `exports` 的 `"./<插件>": "./lib/index.js"`（同一个 `apply`，`config.plugin` 照旧分发），字典靠 `"./<插件>/locale/*.json"`。
   - **锚点的代价必须记住**：禁用 tokstats 行 = 裸包名行没了 = client 图卸载，tokprev / promptopt 的浏览器 UI 一起消失（此前是「关 tokstats 只停统计」）。禁用子路径行只摘它自己的 host fiber。
   - 四条会静默失效的错法都由 guard 拦：子路径行漏 `locale/<插件>/`、`exports` 漏 `"./<插件>"`、`exports` 漏 `"./<插件>/locale/*.json"`、子路径与 `config.plugin` 不同名（文案按 `name` 取、行为按 `config.plugin` 分发，错配时界面显示 A 而跑的是 B）。
+- **组件行顺序 = patch 的 `insert` 顺序**（2026-10-27）：宿主 `declaredRows` 对 `composeEntries` 的结果做 `flatten`，行序就是写入顺序，没有 `order` / `sort` 字段可用。卡片上要换顺序就调 `cordis.patch.yml` 的行序；当前把 tokstats（主线组件、也是锚点行）放在第一位。
 - **宿主没有「任意命名」的通道——一个包的每一行文案只能来自 `${row.name}/locale/en.json`**（2026-10-24 初查，2026-10-26 修正）：标题只有一个来源，`readPluginMeta` 全 asar 仅**一处**调用（`dsh-app-boot/lib/index.js` 的 `metaOf` → `readPluginMeta`），入参是行的 `name`；行 meta 也按它取（`dsh-plugin-manager/lib/index.js` 的 `declaredRows` 里 `const meta = packages?.metaOf(row.name, base)`）；客户端行标题只读 `row.meta.title`（`dsh-client-ui-plugin-manager/lib/client.js` 的 `rowText`），**不存在** `row.label` / `row.title` 字段。所以「任意给某行起名」做不到，能做到的是**用子路径换一份字典**——即上面的两档方案。
 - **不要为了省事把锚点行也改成子路径**：`exactPackageSpecifier` 的 `!specifier.includes("/")` 会把裸包名之外的标识符全部判为「非包根」，`locatePkgJson` 返回 `undefined`，该行**不进入 client 图**——插件 UI 整块消失，宿主不报错（只有浏览器控制台一条 `loaded without registering`）。guard 的「零锚点」检查就是这条的实物防线。
 - **只放 `meta.title` / `meta.description` 两个键**，别加 `meta.icon` 之类——`readPluginMeta` 不读它们，加了是死字段（guard 会给 WARN）。

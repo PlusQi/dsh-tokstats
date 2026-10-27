@@ -13,6 +13,12 @@
 
 ### Changed
 
+- **插件页组件行改为「Token 用量统计」，描述收敛成 tokstats 自己的功能，并把该组件提到第一位**（2026-10-27，**取代**下面「三个组件各一句」那条对 `locale/*.json` 的处置）：组件的名称与描述只走 `${row.name}/locale/en.json` 这一条通道（`readPluginMeta`），而 tokstats 那行恰好是裸包名 **client 锚点**，它读的就是**包级** `locale/{zh,en}.json`——这份文案同时也是插件页顶部**包卡片**的标题与简介。所以三处一次动：
+  - `locale/{zh,en}.json` 的 `meta.title` 由「Token 用量工具箱 / Token Usage Kit」改为「**Token 用量统计** / **Token Usage Stats**」，与侧栏面板名对齐（`panel.title` 早就是这个名），组件行与包卡片同显；
+  - `meta.description` 由「三个组件各一句」改为**只讲 tokstats**：四项用量指标、上下文长度分布、近 12 周热力图与按周趋势、工作区与模型排行。理由与上一条正相反：这一行描述的是**一个组件**，混进 tokprev / promptopt 的功能会让人以为它们在这个组件里；包整体的介绍由 README 首屏的组件表承担。
+  - **代价写明（宿主设计上限，不是笔误）**：包卡片现在与 tokstats 组件同名同义，不再是「三个组件的总称」；宿主没有 `row.label` 通道，想让包卡片保留总称、组件行另起名字，**只能拆成两个包**（拆包还会顺带解决「关 tokstats 行连带卸载另两个 UI」的老问题）。已记入 `docs/MAINTAINING.md` 与 PK-01。
+  - `cordis.patch.yml` 的 `insert` 行序改为 `tokstats → tokprev → promptopt`：宿主按 `composeEntries` 的 `flatten` 顺序出行，没有排序字段，**行序即卡片上的组件序**；主线组件放第一位。
+
 - **市场卡片的截图序改为 tokstats 打头**（2026-10-27 裁决）：`tokstats → tokprev → promptopt → 各自英文版`。卡片首屏只有 3 格（`CARD_SHOT_LIMIT = 3`，每格 `132×88` `contain`），首格决定这张卡第一眼是什么；tokstats 是唯一有「面板实体」的组件，且与包名 `dsh-tokstats` 直接对应。
   - **代价写明**：tokstats 是竖向图（1536×1864，比例 0.82），在 132×88 的横格里 `contain` 后只用到中间约 46px 宽的一条、两侧留灰底；tokprev（5.25）与 promptopt（3.38）在横格里填满得多。本次取「首图与标题对得上」而非「铺满率」。
   - 想两者兼得需给 tokstats 另出一张横向裁切版专供卡片首格（全图留第 2 位），那要改 `render-screenshots.mjs` 加 `--crop` 模式与夹具，**未做**。

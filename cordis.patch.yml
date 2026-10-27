@@ -14,7 +14,12 @@
 #                                rejects any specifier containing '/'), so
 #                                exactly ONE row must keep it or the whole
 #                                client half disappears silently. It reads the
-#                                package-level locale/ (the pack's own copy).
+#                                package-level locale/ (the pack's own copy),
+#                                which the bundle card on the same page shares -
+#                                so that title names THIS component (tokstats)
+#                                rather than the pack, and the bundle card
+#                                follows it. Splitting the two needs separate
+#                                packages; the host has no row.label channel.
 #   - 'dsh-tokstats/<plugin>' <- subpath rows: each reads its own
 #                                locale/<plugin>/{en,zh}.json, so every
 #                                component shows its own title and description
@@ -36,15 +41,17 @@
 # prefixed to never collide with dsh-base / dsh-web-app builtin ids (patch
 # layers override by id).
 - insert:
-    # tokprev: composer 下一轮 token 预告行（子路径行，读 locale/tokprev/）
-    - id: tokprev
-      name: 'dsh-tokstats/tokprev'
-      config:
-        plugin: tokprev
+    # 组件行顺序 = 插件页「包含的组件」的展示顺序（宿主按 patch 的 insert 顺序 flatten，
+    # 没有排序字段）。打头的是包的主线组件 tokstats，它同时是裸包名锚点行。
+    #
     # tokstats: 侧栏列表项 + root `main` 全局面板（hook 已占 sidebar.footer.action，
     # 全局面板的正路是 main keyed slot + ctx.layout.selectPanel）。host 半边注册一个
     # per-session 投影单元：折叠结果由官方 session-projection-cache 持久化，本包不再
     # 写任何自有存储文件。**裸包名行（client 锚点），不要改成子路径。**
+    #   展示文案：读包级 locale/{zh,en}.json。因为裸包名只有这一条通道，包级那份文案
+    #   就是「插件页顶部的包卡片」与「本行」共用的同一份——标题写的是本组件名
+    #   （Token 用量统计），描述写的是 tokstats 这一组件的功能；包卡片因此也不再是
+    #   「三个组件的总称」。想分开只能拆包（宿主没有 row.label 通道，见 PK-01）。
     #   windowDays: 折叠窗口天数（缺省 90）。超过窗口的明细被折进 epoch 合计，
     #               读取期排除并改计 epoch，原始明细不删（面板的「全部」档位仍可查）。
     - id: tokstats
@@ -52,6 +59,11 @@
       config:
         plugin: tokstats
         windowDays: 90
+    # tokprev: composer 下一轮 token 预告行（子路径行，读 locale/tokprev/）
+    - id: tokprev
+      name: 'dsh-tokstats/tokprev'
+      config:
+        plugin: tokprev
     # promptopt: composer dock 的「优化提示词」按钮 + 原文/优化文对照弹层（子路径行，
     # 读 locale/promptopt/）。宿主半边注册 RPC 通道 /dsh-plugins.promptopt（历史名，
     # 不随包名变），走 ctx.llm 做一次旁路模型调用（骑已注册的第一个 provider/model
