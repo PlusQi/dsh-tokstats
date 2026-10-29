@@ -13,6 +13,8 @@
 
 ### Changed
 
+- **README 的 promptopt 小节标题改为「优化成结构化提示词」，中英同步**（2026-10-29）：原标题「把口语草稿摆整齐 / tidy up a spoken draft」只讲了「整理」，没点出产出是结构化提示词，与紧邻组件表里那一行「整理成结构化提示词 / Turns a spoken draft into a structured prompt」对不上；改为与表格同口径的「优化成结构化提示词 / turn a spoken draft into a structured prompt」。纯文案，不改功能。
+
 - **tokstats 宽屏与读图信息层级调整**（2026-10-27）：日柱图 / 热力图栏比由 `1.45:1` 调至 `1.7:1`，宽屏下给主趋势图更多空间；热力图周标与星期标由 `10px` 升至 `11px`；卡头把实际时间范围与峰值等结论拆成独立节点，统一为 `12px + label-secondary`，并各自保留完整 tooltip。纯展示调整，不改统计口径与 host 数据。
 
 - **tokstats 的详细简介铺到 README、`package.json` 与市场条目草案**（2026-10-27）：`locale/*.json` 里那句「用量总览四项指标、上下文长度分布、近 12 周热力图与按周趋势，外加工作区与模型排行」原先只出现在宿主插件页，读者在仓库首屏与市场卡片上读到的是压缩版。本次按「同一事实、不同长度」分四层铺（分工表见 `docs/MAINTAINING.md`「简介文案的四层分工」）：

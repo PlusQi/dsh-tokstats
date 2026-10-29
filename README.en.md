@@ -51,7 +51,7 @@ The official ContextMeter already shows how long the context is. What it does no
 - **Est. output** = the range of the last few turns' real output. It only counts finished turns, so a new session — or the turn currently running — shows `-` (as above), turning into a range like `1.5K–3K` once a turn completes;
 - While a turn is running the whole line hides; with no real-request anchor the figure is prefixed with `*`, meaning heuristic only.
 
-## promptopt: tidy up a spoken draft
+## promptopt: turn a spoken draft into a structured prompt
 
 ![promptopt popover](./docs/assets/promptopt-en.png)
 
