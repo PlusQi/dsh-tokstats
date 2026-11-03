@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-03
+
 ### Fixed
 
 - **宿主升级到 `0.2.1-rc.5` 后三个插件静默失效（pin 仍钉 `0.2.1-rc.3`）**（2026-11-03）：与 v0.7.0 → 0.7.1 同因——宿主 nightly 升到 `0.2.1-rc.5`，而 `engines.dsh` 精确钉在 `0.2.1-rc.3`，宿主 `evaluatePluginCompatibility` 判不兼容后把整包推进 `skippedBundles` 并继续启动，运行期一行日志都不打印，tokprev / tokstats / promptopt 的 UI 一起消失。唯一信号仍是 `dsh plugin --profile <p> list` 的 incompatible 告警。
@@ -455,7 +457,8 @@
 - 双语 README（中文默认 + English）及效果示意图。
 - 设计决策记录 SPEC-tokprev.md（本地留存，不随仓库分发）。
 
-[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.7.0...v0.7.1
