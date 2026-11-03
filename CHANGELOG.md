@@ -6,6 +6,11 @@
 
 ### Fixed
 
+- **宿主升级到 `0.2.1-rc.5` 后三个插件静默失效（pin 仍钉 `0.2.1-rc.3`）**（2026-11-03）：与 v0.7.0 → 0.7.1 同因——宿主 nightly 升到 `0.2.1-rc.5`，而 `engines.dsh` 精确钉在 `0.2.1-rc.3`，宿主 `evaluatePluginCompatibility` 判不兼容后把整包推进 `skippedBundles` 并继续启动，运行期一行日志都不打印，tokprev / tokstats / promptopt 的 UI 一起消失。唯一信号仍是 `dsh plugin --profile <p> list` 的 incompatible 告警。
+  - **修法**：`engines.dsh` 抬到 `0.2.1-rc.5`，`dsh.compatibility.dshReleases` 增列 `0.2.1-rc.5`（保留 `0.2.1-rc.3` 历史实测记录，PK-15 只要求 pin 出现在表里、不要求键集相等）。
+  - **抬 pin 前逐条复核了七条 host 契约（rc.5 asar 源码对读，七条全部成立）**：`connection.rpc.handle` 仍两参（`handle: (channel, handler) => this.register(...)`）、`sessionProjections` 单元字段集与 `snapshot` / `cachedSnapshot` 公开面不变、`sessionPersistence.stat` 仍返回 `revision`、`storageDomain.open(spec)` 仍接受手写 spec、`GenerateOptions.provider` / `model` 仍必填、`conversation.composer.dock` / `conversation.input.right` / `main` / `sidebar.panellist` 四条 slot 全在。**rc.5 上未改一行 `lib/` 即可运行**，本版只动元数据（不碰 `lib/`、不抬 `stateVersion`、不清缓存，投影缓存与统计数据零损失）。
+  - 宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准（rc.5 上为 `0.2.1-rc.5`；`getDshRuntimeVersion()` 读的就是它）。
+
 - **市场卡片缩略图停在旧版**：卡片缩略图与详情弹层横向条都经 `images.weserv.nl` 代理，该服务对缩图结果返回 `Cache-Control: public, max-age=31536000`，缓存键是「编码后的源 URL + 尺寸参数」——**不看源文件内容**。所以 10-26 把 `docs/assets/tokstats*.png` 换成浅色主题后，文件名没变的那两条在 `h=200`（卡片用的尺寸）上一直命中换图前的边缘缓存，而点开的大图走源地址直连、是新图，症状即「卡片预览旧、点进去新」。六张逐一核对后只有 `tokstats.png` / `tokstats-en.png` 命中陈旧缓存（其余 `h=200` 与 cache-bust 后字节一致）。
   - **修法**：`screenshots.json` 六条改为 `raw.githubusercontent.com/…?v=<日期>` 的绝对 URL。市场侧 `safeScreenshots` 只要求 https + 四个 GitHub 域，查询串合法；`thumbUrl` 把整串编码进 `url=`，key 变了就取到新图。**以后每次重截都要抬 `?v=`**。
   - `&clearcache=1` 实测不可靠（第一次新、下一次又回到旧字节），不假设「清缓存能解决」，只认换 URL。
