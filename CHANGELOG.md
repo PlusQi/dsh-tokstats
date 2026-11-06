@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-06
+
 ### Fixed
 
 - **tokprev 的「输出预估」在 `0.2.2-rc.1` 上恒为 `-`（输入预估正常）**（2026-11-06）：宿主把会话 chat 快照的节点从 `useSession().nodes`（数组）迁到了 `useChat().legacy.nodes`（Map，官方 `useSessionStats` 同源）。tokprev 的 `selectOutputHistory` 原本要求 `Array.isArray(s.nodes)`，新形状下拿不到节点 → 输出历史恒空 → 「输出预估」段落恒显示 `-`（而「下一轮输入」走 `contextPressure` 投影，不受影响）。这条是**纯 client 侧数据源漂移**，宿主 RPC / projection / slot 全未变，所以不在上一条「七条 host 契约」的重验范围内，是另一次独立发现的退化。
@@ -467,7 +469,8 @@
 - 双语 README（中文默认 + English）及效果示意图。
 - 设计决策记录 SPEC-tokprev.md（本地留存，不随仓库分发）。
 
-[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.7.1...v0.8.0
