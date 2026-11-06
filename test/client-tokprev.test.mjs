@@ -23,13 +23,19 @@ function setup(opts) {
  * `useProjection` 已不支持 contextBreakdown —— 这里对任何非 contextPressure 的
  * key 都返回 undefined，与收缩后的实现口径一致。
  */
-function lineProps(t, { pressure, draft = "", nodes = [], turnEnds = new Set(), running = false } = {}) {
-	return {
+function lineProps(t, { pressure, draft = "", nodes = [], turnEnds = new Set(), running = false, chatNodes } = {}) {
+	const props = {
 		t,
 		useProjection: (key) => (key === "contextPressure" ? pressure : undefined),
 		useSession: (selector) => selector({ nodes, turnEnds, running }),
 		useInput: (selector) => selector({ draft }),
 	};
+	// 宿主 0.2.2-rc.1 起 chat 节点走 useChat().legacy.nodes（Map）。默认不提供
+	// useChat，让旧形状用例走 useSession 回退路径；显式给 chatNodes 时提供 useChat。
+	if (chatNodes !== undefined) {
+		props.useChat = (selector) => selector({ legacy: { nodes: chatNodes } });
+	}
+	return props;
 }
 
 const PRESSURE = { projectedTokens: 1000, contextWindow: 100000 };
@@ -131,8 +137,7 @@ test("pressureTokens 兜底（projectedTokens 缺席时用它）", () => {
 	assert.match(text, /下一轮输入 ≈ 2\.0K/);
 });
 
-test("输出预估：单样本给 ≈ 值，多样本给 P25–P75 区间", () => {
-	const { line, t } = setup();
+test("输出预估：单样本给 ≈ 值，多样本给 P25–P75 区间", () => {	const { line, t } = setup();
 	const one = textOf(line(lineProps(t, { pressure: PRESSURE, nodes: [
 		{ kind: "assistant", turn: 1, usage: { outputTokens: 500 } },
 	], turnEnds: new Set([1]) })));
@@ -146,6 +151,29 @@ test("输出预估：单样本给 ≈ 值，多样本给 P25–P75 区间", () =
 		{ kind: "assistant", turn: 5, usage: { outputTokens: 500 } },
 	], turnEnds: new Set([1, 2, 3, 4, 5]) })));
 	assert.match(many, /输出预估 200\u2013400/, "P25=200 P75=400");
+});
+
+test("输出预估：0.2.2-rc.1 起节点走 useChat().legacy.nodes（Map）也要算得出（防真机空回归）", () => {
+	const { line, t } = setup();
+	// 用 Map 复现宿主新形状：value = assistant 节点，键任意（宿主按 id 存）。
+	const map = new Map([
+		["n1", { kind: "assistant", turn: 1, usage: { outputTokens: 1000 } }],
+		["n2", { kind: "assistant", turn: 2, usage: { outputTokens: 2000 } }],
+		["n3", { kind: "assistant", turn: 3, usage: { outputTokens: 3000 } }],
+		["n4", { kind: "tool-call", turn: 3 }],
+	]);
+	const text = textOf(line(lineProps(t, { pressure: PRESSURE, chatNodes: map })));
+	// 3 个样本 [1000,2000,3000]：percentile 取索引 floor(q*(n-1)) ⇒ P25=idx0=1000、P75=idx1=2000
+	assert.match(text, /输出预估 1\.0K\u20132\.0K/, "从 useChat Map 正确读 usage.outputTokens");
+	assert.doesNotMatch(text, /输出预估 -/, "不得因数据源迁移而恒空");
+});
+
+test("输出预估：useChat 缺席时回退 useSession.nodes 数组（两代兼容）", () => {
+	const { line, t } = setup();
+	const text = textOf(line(lineProps(t, { pressure: PRESSURE, nodes: [
+		{ kind: "assistant", turn: 1, usage: { outputTokens: 1234 } },
+	] })));
+	assert.match(text, /输出预估 ≈1\.2K/, "旧形状（useSession 数组）仍生效");
 });
 
 test("运行中不渲染（正在生成时预告无意义）", () => {

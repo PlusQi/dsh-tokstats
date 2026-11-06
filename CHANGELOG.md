@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- **tokprev 的「输出预估」在 `0.2.2-rc.1` 上恒为 `-`（输入预估正常）**（2026-11-06）：宿主把会话 chat 快照的节点从 `useSession().nodes`（数组）迁到了 `useChat().legacy.nodes`（Map，官方 `useSessionStats` 同源）。tokprev 的 `selectOutputHistory` 原本要求 `Array.isArray(s.nodes)`，新形状下拿不到节点 → 输出历史恒空 → 「输出预估」段落恒显示 `-`（而「下一轮输入」走 `contextPressure` 投影，不受影响）。这条是**纯 client 侧数据源漂移**，宿主 RPC / projection / slot 全未变，所以不在上一条「七条 host 契约」的重验范围内，是另一次独立发现的退化。
+  - **修法**：`selectOutputHistory` 改为接受 Map / 数组 / 可迭代三种输入（`typeof raw.values === "function" ? raw.values() : raw`），`PredictionLine` 优先取 `useChat((s) => s.legacy.nodes)`、缺席时回退 `useSession((s) => s.nodes)`（两代兼容，硬规则 6 优雅降级）。
+  - **回归防线**：`test/client-tokprev.test.mjs` 新增两条用例——Map 形状（`useChat().legacy.nodes`）能算出预估、旧数组形状仍生效；`lineProps` 支持注入 `chatNodes`。全套 296/296 通过（原 294 + 新增 2）。
+
 - **宿主升级到 `0.2.2-rc.1` 后三个插件再次静默失效（pin 仍钉 `0.2.1-rc.5`）**（2026-11-06）：第三次同因复发（前两次为 v0.7.0 → 0.7.1、rc.3 → rc.5）——宿主升到 `0.2.2-rc.1`，`engines.dsh` 仍精确钉 `0.2.1-rc.5`，`evaluatePluginCompatibility` 判不兼容后把整包推进 `skippedBundles` 并继续启动，运行期零日志，tokprev / tokstats / promptopt 的 UI 一起消失。唯一信号仍是 `dsh plugin --profile <p> list` 的 incompatible 告警。注意 `dsh-runtimes/*/runtime.json` 的 `desktopVersion` 仍停留在 `0.2.1-rc.3`（滞后），**真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.1`**。
   - **修法**：`engines.dsh` 抬到 `0.2.2-rc.1`，`dsh.compatibility.dshReleases` 增列 `0.2.2-rc.1`（保留 `0.2.1-rc.3` / `0.2.1-rc.5` 历史实测记录）。
   - **抬 pin 前逐条复核了七条 host 契约（0.2.2-rc.1 asar 源码对读，七条全部成立）**：`connection.rpc.handle` 仍两参（`handle: (channel, handler) => this.register(...)`）、`sessionProjections` 单元字段集与 `snapshot` / `cachedSnapshot` 公开面不变、`sessionPersistence.stat` 仍返回 `revision`、`storageDomain.open(spec)` 仍接受手写 spec、`GenerateOptions.provider` / `model` 仍必填、`conversation.composer.dock` / `conversation.input.right` / `main` / `sidebar.panellist` 四条 slot 全在（live `Slots.listSubTree` 亦确认）。另核实 tokstats 用到的 `connection.admit` / `sessions` / `webServer.register` / `sessionQuery.listSessions`·`readSession` 仍在。**0.2.2-rc.1 上未改一行 `lib/` 即可运行**，本版只动元数据（不碰 `lib/`、不抬 `stateVersion`、不清缓存，投影缓存与统计数据零损失）。
