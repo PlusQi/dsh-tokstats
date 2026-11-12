@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-12
+
 ### Fixed
 
 - **宿主升级到 `0.2.2-rc.2` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.1`）**（2026-11-12）：第四次同因复发（前三次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1）。宿主升到 `0.2.2-rc.2` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.1`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，tokprev / tokstats / promptopt 的 UI 一起消失。与前三轮不同，rc.2 的「启用但未加载的插件显示未运行及原因」让 `plugin_manager list_bundles` 直接给出 `error.code: incompatible-version`、`runtimeVersion: 0.2.2-rc.2`、`requirements: { "engines.dsh": "0.2.2-rc.1" }`、`rows: []`——不再只能靠 `dsh plugin --profile <p> list` 的告警猜。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.2`。
@@ -478,7 +480,8 @@
 - 双语 README（中文默认 + English）及效果示意图。
 - 设计决策记录 SPEC-tokprev.md（本地留存，不随仓库分发）。
 
-[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.8.0...v0.9.0
