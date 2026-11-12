@@ -35,6 +35,7 @@
 | `package.json`（dsh 声明 / exports / files） | docs/MAINTAINING.md「发布到 GitHub」 | link 安装后重启目检 |
 | SDD 文档（`docs/specs/active/`） | 本地指南 §5.4 / §7.7–7.8 + 该变更的 SPEC | 状态头字段完整 + 交叉链接可达 |
 | `AGENTS.md` / `AGENTS.local.md`（Agent 规则） | 本文件优先级、本机叠加层规则与受影响的路由 | 规则冲突检查 + 链接可达性检查 |
+| `scripts/git/hooks/`（提交 / 推送闸门） | 本文件「Git 提交规范」硬约束 4 与「闸门分层」 | 反向验证：构造合规 / 违规 message 直接调用 hook，确认拦截与放行；`npm test` + `node scripts/check-plugin-structure.js` |
 | 纯文档 / 图片 | — | 链接可达性检查 |
 
 ## Harness 工作协议
@@ -140,13 +141,15 @@ scope 可省略：跨多模块或纯性质类提交（如 `docs: 修正错别字
 
 1. **职责单一**：一个提交一个意图；插件实现与包结构改动分开提交（评审时能独立判断行为影响）；
 2. **行为变化必须进 subject 可见范围**：禁止把功能/行为改动伪装成 `docs:` / `chore:`（语义欺骗，hook 拦不住，靠评审）；
-3. **确实无法拆分时**：在 body 写明混合原因与各部分验证，不得静默混提。
+3. **确实无法拆分时**：在 body 写明混合原因与各部分验证，不得静默混提；
+4. **验证结果不进 commit message**：结构 guard / `npm test` / 目检 / 运行时挂载证据的结论一律不写进 subject 或 body，无论写成裸行、`验证：` 行还是 `- ` bullet（唯一例外是约束 3 的混合提交，须带 `Policy-Exception`）。验证结果的去处是 CHANGELOG 与交付报告，见「body / footer 约定」。
 
 **body / footer 约定**：
 
 - subject 与 body 之间空一行；
 - body 写动机与取舍（为什么这么做），不重复 diff 内容；每块以 `- ` 开头、续行缩进两空格、块间空一行——裸段落堆在一起时扫读分不出有几条动机、哪几句在讲取舍，加前缀后块数一眼可数；
-- 混合提交（约束 3）在 body 分行列出各部分及其验证方式，并用 footer 的 `Policy-Exception: <原因>` 标记——`commit-msg` 只允许带该标记的 body 出现「验证：」行。非混合提交不写验证结果：每类变更的最低验证见「按变更范围读取」表，逐提交复述即噪音。包级改动（`pack`）与插件级改动同批时尤其要列清，例如：`分发框架：lib/index.js apply 分发；插件 patch 行：cordis.patch.yml；测试入口：test/*.test.mjs`。
+- body 只写动机与取舍，**不写验证结果**。验证结果指：结构 guard / `npm test` 的输出与通过数、`PASS` / `FAIL` / `SKIP`、目检结论，以及 `list_plugins` / `list_bundles` / fiber 状态这类运行时挂载证据的结论；无论写成裸行、`验证：` 行还是 `- ` bullet 都算（硬约束 4）。逐提交复述即噪音：每类变更的最低验证见「按变更范围读取」表，结果放 CHANGELOG 与交付报告。`v0.9.3` 的 release body 末条「完整界面目检…4 项全过；rows 恢复三行，三行 fiber 全 active」就是反例。
+- 混合提交（约束 3）在 body 分行列出各部分及其验证方式，并用 footer 的 `Policy-Exception: <原因>` 标记——`commit-msg` 只允许带该标记的 body 出现验证结果；这是硬约束 4 的唯一例外。包级改动（`pack`）与插件级改动同批时尤其要列清，例如：`分发框架：lib/index.js apply 分发；插件 patch 行：cordis.patch.yml；测试入口：test/*.test.mjs`。
 - 关联 issue 用 footer：`Closes #123` / `Fixes #456`（自动关闭）、`Refs #789`（仅引用）。
 - 例外标记：`Policy-Exception: <原因> -- <无法拆分/验证的说明>`，一条提交至多一条，理由为空视为无豁免。
 
@@ -246,7 +249,7 @@ scope 可省略：跨多模块或纯性质类提交（如 `docs: 修正错别字
 
 | 时点 | 机制 | 拦什么 |
 | --- | --- | --- |
-| 提交时 | `commit-msg` hook | 空信息、非 `<type>(<scope>?): <摘要>` 格式、全角冒号、超长(72)、body 出现「验证：」但无 `Policy-Exception` 声明 |
+| 提交时 | `commit-msg` hook | 空信息、非 `<type>(<scope>?): <摘要>` 格式、全角冒号、超长(72)、body 出现验证结果（裸行 / `- ` bullet 均由结果特征词拦截）但无 `Policy-Exception` 声明 |
 | 推送时 | `pre-push` hook | 重跑结构 guard（覆盖 `--no-verify` 漏网提交） |
 
 注意（指南共识）：本地 hook 可被 `git push --no-verify` 绕过，本仓库单人维护无 CI，最终防线是规范自觉；merge / revert 自动提交直接放行。新 clone 启用方式：

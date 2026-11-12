@@ -43,11 +43,18 @@ fi
 # 非混合提交按 AGENTS.md「按变更范围读取」表执行即可，逐提交复述是噪音。
 # 这条是散文约束失效后补的机器闸门：条件性规范（"只有…才…"）靠人回头复核
 # 容易漏——提交时约束成立、拆完提交后不成立，内容却被惯性留了下来。
+#
+# 第二版补 bullet 形态：v0.9.3 的 release commit 把界面检查与运行时挂载证据
+# 写成 `- ` bullet，绕过了只匹配 `^验证[:：]` 裸行的第一版。散文规则靠会话
+# 记忆约束不住 bullet，所以这里加一组「结果特征词」：只要 body 出现验证
+# 结论，无论裸行还是 bullet 都拦，除非有 Policy-Exception（硬约束 3 豁免）。
+# 特征词只收结论不收动作：复核 / 对读 / 重验这类描述动机的词不拦。
+verdict_pattern='验证[:：]|目检|guard OK|npm test|测试通过|PASS|FAIL|SKIP|全过|全绿|零 WARN|0 fail|全 active|rows 恢复|incompatible-version 消失'
 body=$(tail -n +3 "$msg_file")
-if printf '%s\n' "$body" | grep -qE '^验证[:：]'; then
+if printf '%s\n' "$body" | grep -qE "$verdict_pattern"; then
 	if ! printf '%s\n' "$body" | grep -qE '^Policy-Exception: .+'; then
-		echo "[commit-msg] body 出现「验证：」行，但没用 'Policy-Exception: <原因>' 声明混合提交" >&2
-		echo "             验证结果只在混合提交（硬约束 3）才进 body；其余按 AGENTS.md「按变更范围读取」表执行" >&2
+		echo "[commit-msg] body 出现验证结论（guard / 测试 / 界面检查 / 运行时证据），但没用 'Policy-Exception: <原因>' 声明混合提交" >&2
+		echo "             AGENTS.md 硬约束 4：这类结论不进 commit message，裸行与 '- ' bullet 都一样；放 CHANGELOG 与交付报告" >&2
 		exit 1
 	fi
 fi
