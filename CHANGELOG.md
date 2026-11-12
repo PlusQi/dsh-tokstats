@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **宿主升级到 `0.2.2-rc.2` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.1`）**（2026-11-12）：第四次同因复发（前三次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1）。宿主升到 `0.2.2-rc.2` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.1`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，tokprev / tokstats / promptopt 的 UI 一起消失。与前三轮不同，rc.2 的「启用但未加载的插件显示未运行及原因」让 `plugin_manager list_bundles` 直接给出 `error.code: incompatible-version`、`runtimeVersion: 0.2.2-rc.2`、`requirements: { "engines.dsh": "0.2.2-rc.1" }`、`rows: []`——不再只能靠 `dsh plugin --profile <p> list` 的告警猜。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.2`。
+  - **修法**：`engines.dsh` 抬到 `0.2.2-rc.2`，`dsh.compatibility.dshReleases` 增列 `0.2.2-rc.2`（保留 `0.2.1-rc.3` / `0.2.1-rc.5` / `0.2.2-rc.1` 历史实测记录）。
+  - **抬 pin 前逐条复核七条 host 契约（rc.2 asar 源码 + live Inspect 对读，七条全部成立）**：`connection.rpc.handle` 仍两参（`dsh-client-connection/lib/index.js` L727）、`sessionProjections` 的 `init(header, inheritedEventCount)` / `wire` 与 `snapshot` / `cachedSnapshot` 公开面不变（L73/L120/L122）、`sessionPersistence.stat` 仍返回 `revision`（`dsh-session-query/lib/index.js` L415 `revision: snapshot.revision`）、`storageDomain.open(spec)` 仍接受手写 spec（L381）、`GenerateOptions.provider` / `model` 仍必填（`dsh-llm/lib/index.js` L2332 `const { provider, model, ...controls } = config`）、`conversation.composer.dock` / `conversation.input.right` / `main` / `sidebar.panellist` 四条 slot 全在（live `Slots.listSubTree` 与 Host/Client Service 目录）。另核实 `connection.admit` / `sessions` / `webServer.register`（L375）/ `sessionQuery.listSessions`·`readSession`（L95/L1128）仍在；`readPluginMeta` 仍在 `dsh-app-boot/lib/index.js` L3007（维护文档里 rc.1 的 L3002 同步更新）。`useChat().legacy.nodes` 仍是官方 `useSessionStats` 的数据源（`dsh-client-ui-chat/lib/client.js`），tokprev 的 Map / 数组 / 可迭代三态兼容继续生效。
+  - **静态验证 PASS**：`node scripts/check-plugin-structure.js` → `OK: 3 个 patch 行 / 3 个注册插件`、零 WARN；`npm test` → 296/296 通过、0 fail。抬 pin 只改元数据，兼容性在 profile 加载时判定，故静态两步先过、随后抬 pin，退出应用再重开才做目检。
+  - **重启目检三插件 PASS（2026-11-12，维护者确认 4 项全过）**：重开后 `plugin_manager list_bundles` 的 `incompatible-version` 消失、`rows` 恢复 `tokstats` / `tokprev` / `promptopt` 三行；`list_plugins` total 235 → 238（正好 +3），三条 `include:*` 行全部 `enabled: true` / `fiberPhase: active`。目检四项：① 左侧栏「Token 用量统计」入口与面板正常（rc.2 的「更多」收纳没把它藏住）；② 插件页三行不再显示「未运行」及原因；③ tokprev 预告行「输出预估」正常、不恒为 `-`（rc.2 新增向上自动加载更早消息，正是 0.9.2 修过的数据源）；④ promptopt 星标浮层在页面缩放 / 平移下不错位，关闭与采纳正常（浮层是自有的 `position:fixed` + `getBoundingClientRect` 锚定，未用被移除的 `useAnchoredPosition` / `getAnchorRect`；macOS 窗口区域那条仅 macOS Desktop，本机 Windows 不适用）。带参 `cordis_inspect_query` 在本机被宿主拒（`"input" must be an object`），拿不到 slot occupants，故实时占用由目检而非 Inspect 证明。**rc.2 上未改一行 `lib/` 即可运行**，本版只动元数据与文档。
+  - **本次只动元数据与文档**：不碰 `lib/`、不抬 `stateVersion`、不清缓存，投影缓存与统计数据零损失。
+
 ## [0.9.2] - 2026-11-06
 
 ### Fixed
