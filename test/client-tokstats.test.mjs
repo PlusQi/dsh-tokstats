@@ -261,16 +261,73 @@ test("面板打开时发一次 RPC（channel / endpoint / 缺省窗口）", asyn
 	rpc.respond(() => ({ ok: true, value: makeSummary() }));
 	const { react, main, t } = setupClient({ rpc });
 	const tree = await renderPanel(react, main, { t });
-	// 打开时并发拉两块：主报表 + promptopt 计数器（AC-13）。
-	assert.equal(rpc.calls.length, 2, "打开即各拉一次");
+	// 打开时并发拉三块：主报表 + promptopt 计数器（AC-13）+ 检查更新（角标）。
+	assert.equal(rpc.calls.length, 3, "打开即各拉一次");
 	const summary = rpc.calls.find((c) => c.endpoint === "summary");
 	const counters = rpc.calls.find((c) => c.endpoint === "promptopt");
+	const update = rpc.calls.find((c) => c.endpoint === "update");
 	assert.ok(summary, "应拉主报表");
 	assert.ok(counters, "应拉 promptopt 计数器");
+	assert.ok(update, "应拉检查更新");
 	assert.equal(summary.channel, CHANNEL);
 	assert.equal(summary.payload.windowDays, 1, "缺省档位是「当日」（windowDays = 1 正好是今天）");
 	assert.equal(summary.payload.workspace, undefined, "未选工作区时不传该字段");
 	assert.ok(tree !== null);
+});
+
+// ── 检查更新角标（update 端点）────────────────────────────────────────────
+
+test("检查更新：newer 时页头渲染「有新版本」角标并带 Releases 链接", async () => {
+	const rpc = makeRpcStub();
+	rpc.respond((call) => {
+		if (call.endpoint === "update") {
+			return { ok: true, value: { installed: "0.9.3", latest: "v9.9.9", url: "https://github.com/PlusQi/dsh-tokstats/releases", newer: true } };
+		}
+		if (call.endpoint === "promptopt") return { ok: true, value: null };
+		return { ok: true, value: makeSummary() };
+	});
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const badge = nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-updateBadge"));
+	assert.ok(badge, "有更新时应渲染角标");
+	assert.equal(badge.props.href, "https://github.com/PlusQi/dsh-tokstats/releases");
+	assert.equal(badge.props.target, "_blank");
+	assert.match(textOf(badge), /v9\.9\.9/, "角标文案带最新版本号");
+});
+
+test("检查更新：无更新 / 拿不到信息时不渲染角标（硬规则 6）", async () => {
+	const rpc = makeRpcStub();
+	rpc.respond((call) => {
+		if (call.endpoint === "update") return { ok: true, value: null };
+		if (call.endpoint === "promptopt") return { ok: true, value: null };
+		return { ok: true, value: makeSummary() };
+	});
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	assert.equal(nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-updateBadge")), undefined, "无更新不得渲染角标");
+});
+
+test("检查更新：newer=false（不落后于安装版）同样不渲染角标", async () => {
+	const rpc = makeRpcStub();
+	rpc.respond((call) => {
+		if (call.endpoint === "update") return { ok: true, value: { installed: "0.9.3", latest: "v0.9.3", url: "u", newer: false } };
+		if (call.endpoint === "promptopt") return { ok: true, value: null };
+		return { ok: true, value: makeSummary() };
+	});
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	assert.equal(nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-updateBadge")), undefined);
+});
+
+test("检查更新：词典 update.available / update.title zh/en 成对且为整句模板", () => {
+	const { dicts } = setupClient();
+	assertDictPair(assert, NS, dicts);
+	const zh = dicts[NS].zh;
+	const en = dicts[NS].en;
+	assert.ok(Object.prototype.hasOwnProperty.call(zh, "update.available"));
+	assert.ok(Object.prototype.hasOwnProperty.call(en, "update.available"));
+	assert.ok(zh["update.available"].includes("{version}"), "角标文案是带 {version} 的整句模板");
+	assert.ok(en["update.available"].includes("{version}"));
 });
 
 test("AC-9：桶分布 6 行全渲染，非零桶显示数值、零桶显示破折号", async () => {
@@ -1312,7 +1369,8 @@ test("TS-24：verifying 为 true 时自动重拉一次，收敛后停止", async
 	try {
 		const rpc = makeRpcStub();
 		let round = 0;
-		rpc.respond(() => {
+		rpc.respond((call) => {
+			if (call.endpoint !== "summary") return { ok: true, value: null };
 			round += 1;
 			// 第 1 轮：后台校验中；第 2 轮：已收敛。
 			return { ok: true, value: makeSummary({ verifying: round === 1 }) };
@@ -1375,7 +1433,8 @@ test("TS-25：后台自动重拉期间旧内容保留在屏上，不换成「统
 	try {
 		const rpc = makeRpcStub();
 		let round = 0;
-		rpc.respond(() => {
+		rpc.respond((call) => {
+			if (call.endpoint !== "summary") return { ok: true, value: null };
 			round += 1;
 			// 前两轮都在校验中（会继续排重拉），第三轮收敛。
 			return { ok: true, value: makeSummary({ verifying: round <= 2 }) };
@@ -1419,7 +1478,8 @@ test("TS-25：用户主动切档位时清掉后台标记，旧内容按窗口口
 	try {
 		const rpc = makeRpcStub();
 		let round = 0;
-		rpc.respond(() => {
+		rpc.respond((call) => {
+			if (call.endpoint !== "summary") return { ok: true, value: null };
 			round += 1;
 			return { ok: true, value: makeSummary({ verifying: round <= 2 }) };
 		});
@@ -1459,7 +1519,8 @@ test("TS-25：后台重拉采用更长退避（3s），且不因退避变化而�
 	try {
 		const rpc = makeRpcStub();
 		let round = 0;
-		rpc.respond(() => {
+		rpc.respond((call) => {
+			if (call.endpoint !== "summary") return { ok: true, value: null };
 			round += 1;
 			return { ok: true, value: makeSummary({ verifying: round <= 3 }) };
 		});

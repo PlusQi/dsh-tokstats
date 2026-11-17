@@ -31,6 +31,10 @@ import {
 	TOKSTATS_BUCKET_COUNT,
 	TOKSTATS_CHANNEL,
 	TOKSTATS_ENDPOINT,
+	TOKSTATS_UPDATE_ENDPOINT,
+	tokstatsLatestTag,
+	tokstatsCompareVersion,
+	tokstatsCheckUpdate,
 	TOKSTATS_HEATMAP_DAYS,
 	tokstatsRouteOf,
 } from "../lib/index.js";
@@ -2160,6 +2164,59 @@ test("TS-29：day 落在折叠区间内时 epoch 端点仍要报（client 靠它
 	assert.equal(result.epoch.end, "2026-08-21");
 	assert.equal(result.epoch.calls, 4, "epoch.calls 如实给出区间合计（供热力图 tooltip 说明）");
 	assert.equal(result.totals.calls, 0, "但那天的明细数不得凭空补出来");
+});
+
+// ── 检查更新（update 端点 / 角标数据源）─────────────────────────────────────
+
+test("检查更新：tokstatsLatestTag 取最新稳定版，忽略预发布与非法", () => {
+	const tags = [{ name: "v0.9.3" }, { name: "v0.10.0" }, { name: "v1.0.0-rc.1" }, { name: "nope" }, { name: "v0.9.10" }];
+	assert.equal(tokstatsLatestTag(tags), "v0.10.0");
+	assert.equal(tokstatsLatestTag([]), null);
+	assert.equal(tokstatsLatestTag(null), null);
+});
+
+test("检查更新：tokstatsCompareVersion 按数值比较，非法返回 null", () => {
+	assert.equal(tokstatsCompareVersion("0.9.3", "0.9.10"), -1);
+	assert.equal(tokstatsCompareVersion("v1.0.0", "0.9.9"), 1);
+	assert.equal(tokstatsCompareVersion("0.9.3", "v0.9.3"), 0);
+	assert.equal(tokstatsCompareVersion("x", "1.0.0"), null);
+});
+
+test("检查更新：tokstatsCheckUpdate 有更新/不落后/失败/缓存", async () => {
+	const tags = async () => ({ ok: true, json: async () => [{ name: "v0.9.3" }, { name: "v9.9.9" }] });
+	const newer = await tokstatsCheckUpdate(() => {}, undefined, { cache: {}, installed: "0.9.3", fetchImpl: tags });
+	assert.deepEqual(newer, {
+		installed: "0.9.3", latest: "v9.9.9",
+		url: "https://github.com/PlusQi/dsh-tokstats/releases", newer: true,
+	});
+	const same = await tokstatsCheckUpdate(() => {}, undefined, { cache: {}, installed: "9.9.9", fetchImpl: tags });
+	assert.equal(same.newer, false, "安装版不低于最新 tag → 无更新");
+	const failing = await tokstatsCheckUpdate(() => {}, undefined, {
+		cache: {}, installed: "0.9.3", fetchImpl: async () => { throw new Error("net"); },
+	});
+	assert.equal(failing, null, "网络失败返回 null，不抛");
+	// 缓存：同一 cache 在 TTL 内第二次不再打 fetch。
+	let fetches = 0;
+	const counting = async () => { fetches += 1; return { ok: true, json: async () => [{ name: "v9.9.9" }] }; };
+	const cache = {};
+	await tokstatsCheckUpdate(() => {}, undefined, { cache, installed: "0.9.3", fetchImpl: counting, now: 1000 });
+	await tokstatsCheckUpdate(() => {}, undefined, { cache, installed: "0.9.3", fetchImpl: counting, now: 2000 });
+	assert.equal(fetches, 1, "6h TTL 内只 fetch 一次");
+});
+
+test("检查更新：update 端点挂在 tokstats 通道，fetch 失败时返回 ok + null（不抛）", async () => {
+	const connection = makeConnection();
+	const { ctx } = makeCtx({ connection, sessionQuery: makeSessionQuery([], {}), sessionProjectionCache: makeProjectionCache({}) });
+	startTokstats(ctx);
+	const original = globalThis.fetch;
+	try {
+		globalThis.fetch = async () => { throw new Error("offline"); };
+		const result = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_UPDATE_ENDPOINT, {});
+		assert.equal(result.ok, true);
+		assert.equal(result.value, null, "拿不到更新信息时返回 null，不抛");
+	} finally {
+		globalThis.fetch = original;
+	}
 });
 
 

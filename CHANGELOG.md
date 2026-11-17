@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **tokstats 面板新增「有新版本」角标（检查更新，只提示、不自动安装）**（2026-11-17）：用 GitHub 裸地址安装时，DSH 本身不会轮询仓库、也没有「更新可用」提示（`dsh-plugin-manager` 的版本检测只认 npm registry，Git 包 `listBundles` 直接判 `not-updatable`）。为让用户至少能「感知」到新版，tokstats 面板页头新增一枚可点角标「有新版本 vX.Y.Z」：host 新增 `update` 端点（复用 `/dsh-plugins.tokstats` 自建通道）读自身 `package.json` 版本、拉 GitHub tags 取最新稳定版做数值比较，client 在 `newer === true` 时渲染一个打开 GitHub Releases 的外链。
+  - **边界**：只提示、不自动安装、不改 profile；拿不到 / 网络失败 / 无更新一律返回 null、角标不渲染（硬规则 6）。tags 成功缓存 6h、失败 10min（GitHub 未认证限额 60 次/小时）；host 只读 `node:fs`（不写盘，PK-08）、用 Node 内建全局 `fetch`（不是 npm 依赖，硬规则 5）。对应不变量 TS-37。
+  - **静态验证 PASS**：`node scripts/check-plugin-structure.js` → `OK: 3 个 patch 行 / 3 个注册插件`、零 WARN；`npm test` → 304/304 通过、0 fail（新增 8 条：host 4 + client 4）。
+  - **重启后校验 PASS（2026-11-17，维护者退出重开）**：三行 host 条目齐备（`include:tokstats` / `include:tokprev` / `include:promptopt`）、`main` 的 `tokstats` occupant `active`、面板正常不崩；因安装版 `0.9.3` = 最新 tag `v0.9.3`，角标**不出现**（正确的「无更新」态）。真实 GitHub 自检返回 `{"installed":"0.9.3","latest":"v0.9.3","newer":false}`。「有新版本」角标的渲染路径由 client 单测覆盖（有更新渲染带链接角标 / 无更新不渲染），待出现更高 tag 时再目检其实际外观。
+
 ### Fixed
 
 - **宿主升级到 `0.2.2-rc.3` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.2`）**（2026-11-17）：第五次同因复发（前四次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1、rc.1 → rc.2）。宿主升到 `0.2.2-rc.3` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.2`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，tokprev / tokstats / promptopt 的 UI 一起消失。`plugin_manager list_bundles` 直接给出 `error.code: incompatible-version`、`runtimeVersion: 0.2.2-rc.3`、`requirements: { "engines.dsh": "0.2.2-rc.2" }`、`rows: []`。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.3`。
