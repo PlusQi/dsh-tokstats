@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-17
+
 ### Added
 
 - **tokstats 面板新增「有新版本」角标（检查更新，只提示、不自动安装）**（2026-11-17）：用 GitHub 裸地址安装时，DSH 本身不会轮询仓库、也没有「更新可用」提示（`dsh-plugin-manager` 的版本检测只认 npm registry，Git 包 `listBundles` 直接判 `not-updatable`）。为让用户至少能「感知」到新版，tokstats 面板页头新增一枚可点角标「有新版本 vX.Y.Z」：host 新增 `update` 端点（复用 `/dsh-plugins.tokstats` 自建通道）读自身 `package.json` 版本、拉 GitHub tags 取最新稳定版做数值比较，client 在 `newer === true` 时渲染一个打开 GitHub Releases 的外链。
@@ -495,7 +497,8 @@
 - 双语 README（中文默认 + English）及效果示意图。
 - 设计决策记录 SPEC-tokprev.md（本地留存，不随仓库分发）。
 
-[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.0...v0.9.1
