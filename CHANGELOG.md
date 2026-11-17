@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **宿主升级到 `0.2.2-rc.3` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.2`）**（2026-11-17）：第五次同因复发（前四次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1、rc.1 → rc.2）。宿主升到 `0.2.2-rc.3` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.2`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，tokprev / tokstats / promptopt 的 UI 一起消失。`plugin_manager list_bundles` 直接给出 `error.code: incompatible-version`、`runtimeVersion: 0.2.2-rc.3`、`requirements: { "engines.dsh": "0.2.2-rc.2" }`、`rows: []`。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.3`。
+  - **修法**：`engines.dsh` 抬到 `0.2.2-rc.3`，`dsh.compatibility.dshReleases` 增列 `0.2.2-rc.3`（保留 `0.2.1-rc.3` / `0.2.1-rc.5` / `0.2.2-rc.1` / `0.2.2-rc.2` 历史实测记录）。
+  - **抬 pin 前逐条复核七条 host 契约（rc.3 asar 源码 + live Inspect 对读，七条全部成立）**：`connection.rpc.handle` 仍两参（`dsh-client-connection/lib/index.js` L727）、`sessionProjections` 的 `init(header, inheritedEventCount)`（L121）/ `wire` / `snapshot`（L233/256/281）/ `cachedSnapshot`（L258）公开面不变、`sessionPersistence.stat` 仍返回 `revision`（`dsh-session-query/lib/index.js` L416 `revision: snapshot.revision`）、`storageDomain.open(spec)` 仍接受手写 spec（`dsh-storage-domain/lib/index.js` L382）、`GenerateOptions.provider` / `model` 仍必填（`dsh-llm/lib/index.js` L2333 `const { provider, model, ...controls } = config`）、四条 slot（`conversation.composer.dock` / `conversation.input.right` / `main` / `sidebar.panellist`）全在（live `Slots.listSubTree`）。另核实 `connection.admit` / `sessions` / `webServer.register`（`dsh-host-webserver/lib/index.js` L376）/ `sessionQuery.listSessions`·`readSession`（L96/L1129）仍在；`readPluginMeta` 在 `dsh-app-boot/lib/index.js` L3008。
+  - **静态验证 PASS**：`node scripts/check-plugin-structure.js` → `OK: 3 个 patch 行 / 3 个注册插件`、零 WARN；`npm test` → 296/296 通过、0 fail。本次只动元数据与文档，不碰 `lib/`、不抬 `stateVersion`、不清缓存，投影缓存与统计数据零损失。
+  - **重启后校验 PASS（2026-11-17，维护者退出重开）**：`plugin_manager list_bundles` 的 `dsh-tokstats` 条目 `error` 消失、`rows` 恢复 `tokstats` / `tokprev` / `promptopt` 三行；host `Config` 目录含 `include:tokstats` / `include:tokprev` / `include:promptopt` 三行；live `Slots` 三处 occupant 全部 `active: true`——`main` 的 `key: tokstats`（面板）、`conversation.composer.dock` 的 `tok-preview`（预告行）、`conversation.input.right` 的 `promptopt-button`（优化按钮）。三插件在 `0.2.2-rc.3` 上恢复（逐插件的画面内容仍建议扫一眼）。
+
 ## [0.9.3] - 2026-11-12
 
 ### Fixed
