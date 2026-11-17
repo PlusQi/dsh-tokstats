@@ -13,6 +13,10 @@
   - **静态验证 PASS**：`node scripts/check-plugin-structure.js` → `OK: 3 个 patch 行 / 3 个注册插件`、零 WARN；`npm test` → 304/304 通过、0 fail（新增 8 条：host 4 + client 4）。
   - **重启后校验 PASS（2026-11-17，维护者退出重开）**：三行 host 条目齐备（`include:tokstats` / `include:tokprev` / `include:promptopt`）、`main` 的 `tokstats` occupant `active`、面板正常不崩；因安装版 `0.9.3` = 最新 tag `v0.9.3`，角标**不出现**（正确的「无更新」态）。真实 GitHub 自检返回 `{"installed":"0.9.3","latest":"v0.9.3","newer":false}`。「有新版本」角标的渲染路径由 client 单测覆盖（有更新渲染带链接角标 / 无更新不渲染），待出现更高 tag 时再目检其实际外观。
 
+- **tokstats 升格为「一键更新」**（2026-11-17）：在「有新版本」角标旁增加「一键更新」按钮。点击后 client 调 host 的 `applyUpdate` 端点，host 校验 `spec` 必须是**本仓库 + 完整 40 位 commit**（`^github:PlusQi/dsh-tokstats(?:\.git)?#[0-9a-f]{40}$`），再委托官方 `pluginManager.installBundle(spec)`（官方 pnpm 管线；执行在 plugin-manager 自己的 fiber，替换本 bundle 不会中断调用）。不 await、失败降级为 Releases 外链；升级完成后重启 DSH 生效。对应不变量 TS-38。
+  - **可行性隔离探针 PASS（2026-11-17）**：临时目录里对同名 Git 包 `pnpm add github:PlusQi/dsh-tokstats#<commit>`，从 `v0.9.3`（`d80f228`）原地升级到 `v0.10.0`（`2f39971`），依赖 spec 同步改为 pinned —— 即 `installBundle` 底层机制成立；因其 `already-installed` 守卫只在入参 spec 与已存 spec **完全相同**时触发（`specPackageName`），升级用不同 pinned spec 不会命中。
+  - **静态验证 PASS**：`node --check` 两文件通过；`check-plugin-structure.js` OK 零 WARN；`npm test` → 308/308（新增 applyUpdate 用例：host 3 + client 1 + 词典 1）。
+
 ### Fixed
 
 - **宿主升级到 `0.2.2-rc.3` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.2`）**（2026-11-17）：第五次同因复发（前四次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1、rc.1 → rc.2）。宿主升到 `0.2.2-rc.3` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.2`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，tokprev / tokstats / promptopt 的 UI 一起消失。`plugin_manager list_bundles` 直接给出 `error.code: incompatible-version`、`runtimeVersion: 0.2.2-rc.3`、`requirements: { "engines.dsh": "0.2.2-rc.2" }`、`rows: []`。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.3`。

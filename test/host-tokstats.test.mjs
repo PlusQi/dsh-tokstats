@@ -32,6 +32,7 @@ import {
 	TOKSTATS_CHANNEL,
 	TOKSTATS_ENDPOINT,
 	TOKSTATS_UPDATE_ENDPOINT,
+	TOKSTATS_UPDATE_APPLY_ENDPOINT,
 	tokstatsLatestTag,
 	tokstatsCompareVersion,
 	tokstatsCheckUpdate,
@@ -1165,7 +1166,7 @@ function makeConnection() {
  * `cannot get property "webServer" without inject` 而不注册通道——这是实测踩到的
  * 真缺陷，桩必须按真实契约提供它，否则测不出「忘了注入」。
  */
-function makeCtx({ connection, sessionQuery, sessionProjectionCache, projections = true, liveSessions, webServer, loggerWarns, sessionPersistence, storageDomain } = {}) {
+function makeCtx({ connection, sessionQuery, sessionProjectionCache, projections = true, liveSessions, webServer, loggerWarns, sessionPersistence, storageDomain, pluginManager } = {}) {
 	const state = { registered: [], injectCalls: [], effects: [] };
 	const hasWebServer = webServer !== null;
 	// 默认用 connection 自带的那份 webServer 桩：用例既能 `connection.invoke(...)`
@@ -1184,6 +1185,8 @@ function makeCtx({ connection, sessionQuery, sessionProjectionCache, projections
 	if (sessionPersistence !== undefined) provided.sessionPersistence = sessionPersistence;
 	// `storageDomain` 服务（TS-26 的冷读凭据域）：实现用 inject 取。
 	if (storageDomain !== undefined) provided.storageDomain = storageDomain;
+	// `pluginManager`（一键更新）：实现用 `pctx.get("pluginManager")` 惰性取，缺席则端点返回 unavailable。
+	if (pluginManager !== undefined) provided.pluginManager = pluginManager;
 	const ctx = {
 		logger: { warn: (...args) => { if (loggerWarns !== undefined) loggerWarns.push(args.join(" ")); } },
 		get(name) {
@@ -2187,8 +2190,15 @@ test("检查更新：tokstatsCheckUpdate 有更新/不落后/失败/缓存", asy
 	const newer = await tokstatsCheckUpdate(() => {}, undefined, { cache: {}, installed: "0.9.3", fetchImpl: tags });
 	assert.deepEqual(newer, {
 		installed: "0.9.3", latest: "v9.9.9",
-		url: "https://github.com/PlusQi/dsh-tokstats/releases", newer: true,
+		url: "https://github.com/PlusQi/dsh-tokstats/releases", newer: true, spec: "",
 	});
+	// 带 commit sha 时给出 pinned spec（一键更新要用）。
+	const withCommit = await tokstatsCheckUpdate(() => {}, undefined, {
+		cache: {}, installed: "0.9.3",
+		fetchImpl: async () => ({ ok: true, json: async () => [{ name: "v9.9.9", commit: { sha: "0123456789abcdef0123456789abcdef01234567" } }] }),
+	});
+	assert.equal(withCommit.newer, true);
+	assert.equal(withCommit.spec, "github:PlusQi/dsh-tokstats#0123456789abcdef0123456789abcdef01234567");
 	const same = await tokstatsCheckUpdate(() => {}, undefined, { cache: {}, installed: "9.9.9", fetchImpl: tags });
 	assert.equal(same.newer, false, "安装版不低于最新 tag → 无更新");
 	const failing = await tokstatsCheckUpdate(() => {}, undefined, {
@@ -2217,6 +2227,53 @@ test("检查更新：update 端点挂在 tokstats 通道，fetch 失败时返回
 	} finally {
 		globalThis.fetch = original;
 	}
+});
+
+test("一键更新：applyUpdate 在 pluginManager 缺席时返回 unavailable（不抛）", async () => {
+	const connection = makeConnection();
+	const { ctx } = makeCtx({ connection, sessionQuery: makeSessionQuery([], {}), sessionProjectionCache: makeProjectionCache({}) });
+	startTokstats(ctx);
+	const result = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_UPDATE_APPLY_ENDPOINT, {
+		spec: "github:PlusQi/dsh-tokstats#0123456789abcdef0123456789abcdef01234567",
+	});
+	assert.equal(result.ok, false);
+	assert.equal(result.error.code, "unavailable");
+});
+
+test("一键更新：applyUpdate 拒绝非本仓库 / 非完整 commit 的 spec", async () => {
+	const calls = [];
+	const pluginManager = { installBundle(spec) { calls.push(spec); return Promise.resolve({}); } };
+	const connection = makeConnection();
+	const { ctx } = makeCtx({ connection, sessionQuery: makeSessionQuery([], {}), sessionProjectionCache: makeProjectionCache({}), pluginManager });
+	startTokstats(ctx);
+	for (const bad of [
+		"github:evil/repo#0123456789abcdef0123456789abcdef01234567",
+		"github:PlusQi/dsh-tokstats#v0.10.0",
+		"https://example.com/x.tgz",
+	]) {
+		const r = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_UPDATE_APPLY_ENDPOINT, { spec: bad });
+		assert.equal(r.ok, false);
+		assert.equal(r.error.code, "bad-request");
+	}
+	assert.equal(calls.length, 0, "非法 spec 不得调 installBundle");
+});
+
+test("一键更新：applyUpdate 合法 pinned spec → 调 installBundle 并返回 started", async () => {
+	const calls = [];
+	const pluginManager = {
+		installBundle(spec, opts) { calls.push({ spec, opts }); return Promise.resolve({ changed: true }); },
+	};
+	const connection = makeConnection();
+	const { ctx } = makeCtx({ connection, sessionQuery: makeSessionQuery([], {}), sessionProjectionCache: makeProjectionCache({}), pluginManager });
+	startTokstats(ctx);
+	const spec = "github:PlusQi/dsh-tokstats#0123456789abcdef0123456789abcdef01234567";
+	const result = await connection.invoke(TOKSTATS_CHANNEL, TOKSTATS_UPDATE_APPLY_ENDPOINT, { spec });
+	assert.equal(result.ok, true);
+	assert.equal(result.value.started, true);
+	assert.equal(result.value.spec, spec);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(calls.length, 1, "必须调一次官方 installBundle");
+	assert.equal(calls[0].spec, spec);
 });
 
 

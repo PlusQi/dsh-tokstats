@@ -278,10 +278,11 @@ test("面板打开时发一次 RPC（channel / endpoint / 缺省窗口）", asyn
 // ── 检查更新角标（update 端点）────────────────────────────────────────────
 
 test("检查更新：newer 时页头渲染「有新版本」角标并带 Releases 链接", async () => {
+	const spec = "github:PlusQi/dsh-tokstats#0123456789abcdef0123456789abcdef01234567";
 	const rpc = makeRpcStub();
 	rpc.respond((call) => {
 		if (call.endpoint === "update") {
-			return { ok: true, value: { installed: "0.9.3", latest: "v9.9.9", url: "https://github.com/PlusQi/dsh-tokstats/releases", newer: true } };
+			return { ok: true, value: { installed: "0.9.3", latest: "v9.9.9", url: "https://github.com/PlusQi/dsh-tokstats/releases", newer: true, spec } };
 		}
 		if (call.endpoint === "promptopt") return { ok: true, value: null };
 		return { ok: true, value: makeSummary() };
@@ -293,6 +294,35 @@ test("检查更新：newer 时页头渲染「有新版本」角标并带 Release
 	assert.equal(badge.props.href, "https://github.com/PlusQi/dsh-tokstats/releases");
 	assert.equal(badge.props.target, "_blank");
 	assert.match(textOf(badge), /v9\.9\.9/, "角标文案带最新版本号");
+	const btn = nodesOf(tree).find((n) => n.type === "button" && hasClass(n, "dsh-tokstats-updateBtn"));
+	assert.ok(btn, "有 pinned spec 时应渲染「一键更新」按钮");
+	assert.equal(textOf(btn), "一键更新");
+});
+
+test("一键更新：点按钮调 applyUpdate（带 spec），成功后显示「已开始」", async () => {
+	const spec = "github:PlusQi/dsh-tokstats#0123456789abcdef0123456789abcdef01234567";
+	const rpc = makeRpcStub();
+	rpc.respond((call) => {
+		if (call.endpoint === "update") return { ok: true, value: { installed: "0.9.3", latest: "v9.9.9", url: "u", newer: true, spec } };
+		if (call.endpoint === "applyUpdate") return { ok: true, value: { started: true, spec } };
+		if (call.endpoint === "promptopt") return { ok: true, value: null };
+		return { ok: true, value: makeSummary() };
+	});
+	const { react, main, t } = setupClient({ rpc });
+	const tree = await renderPanel(react, main, { t });
+	const btn = nodesOf(tree).find((n) => n.type === "button" && hasClass(n, "dsh-tokstats-updateBtn"));
+	assert.ok(btn);
+	react.reset();
+	btn.props.onClick();
+	for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r));
+	const apply = rpc.calls.find((c) => c.endpoint === "applyUpdate");
+	assert.ok(apply, "点击必须调 applyUpdate");
+	assert.equal(apply.payload.spec, spec);
+	react.reset();
+	const after = renderDeep(react, main.comp({ t }));
+	const btn2 = nodesOf(after).find((n) => n.type === "button" && hasClass(n, "dsh-tokstats-updateBtn"));
+	assert.ok(btn2, "按钮仍在");
+	assert.equal(textOf(btn2), "更新已在后台开始，请稍候几分钟再重启 DSH");
 });
 
 test("检查更新：无更新 / 拿不到信息时不渲染角标（硬规则 6）", async () => {
@@ -319,13 +349,15 @@ test("检查更新：newer=false（不落后于安装版）同样不渲染角标
 	assert.equal(nodesOf(tree).find((n) => hasClass(n, "dsh-tokstats-updateBadge")), undefined);
 });
 
-test("检查更新：词典 update.available / update.title zh/en 成对且为整句模板", () => {
+test("检查更新：词典 update.* zh/en 成对且为整句模板", () => {
 	const { dicts } = setupClient();
 	assertDictPair(assert, NS, dicts);
 	const zh = dicts[NS].zh;
 	const en = dicts[NS].en;
-	assert.ok(Object.prototype.hasOwnProperty.call(zh, "update.available"));
-	assert.ok(Object.prototype.hasOwnProperty.call(en, "update.available"));
+	for (const key of ["update.available", "update.action", "update.actionTitle", "update.applying", "update.done", "update.failed", "update.title"]) {
+		assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `zh 缺键 ${key}`);
+		assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en 缺键 ${key}`);
+	}
 	assert.ok(zh["update.available"].includes("{version}"), "角标文案是带 {version} 的整句模板");
 	assert.ok(en["update.available"].includes("{version}"));
 });
