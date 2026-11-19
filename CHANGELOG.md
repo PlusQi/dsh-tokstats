@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-19
+
 ### Fixed
 
 - **宿主升级到 `0.2.2-rc.5` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.3`）**（2026-11-19）：第六次同因复发（前五次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1、rc.1 → rc.2、rc.2 → rc.3）。宿主升到 `0.2.2-rc.5` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.3`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，运行期不打印任何日志，tokstats / tokprev / promptopt 的 UI 整块消失。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.5`。
@@ -513,7 +515,8 @@
 - 双语 README（中文默认 + English）及效果示意图。
 - 设计决策记录 SPEC-tokprev.md（本地留存，不随仓库分发）。
 
-[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/PlusQi/dsh-tokstats/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/PlusQi/dsh-tokstats/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/PlusQi/dsh-tokstats/compare/v0.9.2...v0.9.3
