@@ -578,16 +578,44 @@ for (const { row, suffix } of subpathRows) {
 // 判据刻意只要求「声明了 dsh 版本时，该版本必须出现在 dshReleases 里」，不要求两边键集
 // 完全相等：`dshReleases` 允许保留历史实测版本（它描述的是「实测过哪些」），而 `engines.dsh`
 // 只能有一个值。相等要求会逼人在抬 pin 时删掉历史记录，反而丢证据。
+// ── PK-15 修订（2026-11-19）：允许「只设下界」的区间 `>=<version>` ──
+//
+// 背景：精确 pin 把「可能破坏」当成「一定破坏」处理，rc.x 之间的假不兼容反复误伤用户
+// （已复活六次）。宿主 evaluatePluginCompatibility 实际是
+// `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`（dsh-app-boot
+// `lib/index.js` L1099-1100 实测）——真语义化区间判得对，旧注释里「写成区间会抛错」
+// 的说法已被证伪。据此裁决改为：**只设下界、不设未来上界**，即 `>=<最低实测版本>`。
+//
+// 本项的新判据：
+//   · 允许两种形态：纯版本 `X.Y.Z[-pre]` 或下界区间 `>=X.Y.Z[-pre]`；其余（`^` / `~` /
+//     上下界区间 / 空串 / `*` / 其它操作符）一律拦——它们会替未实测的版本放行，或语义含混；
+//   · 无论哪种形态，从中取出的**基线版本**都必须出现在 `dsh.compatibility.dshReleases` 里
+//     （保留「抬 pin 忘了同步文档」的拦截，只是基线从「精确值」变成「下界值」）。
 const DSH_VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+// 下界区间：`>=` + 一个语义化版本。只认这一个操作符——`^`/`~` 会隐式引入上界或放宽次版本，
+// 多操作符区间（如 `>=a <b`）会替未实测的未来大版本设限，都与「只设下界」的裁决相悖。
+const DSH_LOWER_BOUND_SHAPE = /^>=\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const enginesDsh = pkg.engines?.dsh;
 const declaredReleases = pkg.dsh?.compatibility?.dshReleases;
+
+// 从 engines.dsh 里取出用于核对 dshReleases 的**基线版本**：精确值即本身，下界区间取下界。
+// 形态非法时返回 { ok: false }，由调用方报错。
+function enginesDshBaseline(value) {
+	if (typeof value !== "string") return { ok: false, reason: "不是字符串" };
+	if (DSH_VERSION_SHAPE.test(value)) return { ok: true, version: value, form: "exact" };
+	const m = value.match(DSH_LOWER_BOUND_SHAPE);
+	if (m !== null) return { ok: true, version: m[1], form: "lower" };
+	return { ok: false, reason: "既不是语义化版本，也不是 `>=<version>` 形式的下界区间" };
+}
+
 if (enginesDsh !== undefined) {
-	if (typeof enginesDsh !== "string" || !DSH_VERSION_SHAPE.test(enginesDsh)) {
-		problems.push(`package.json: engines.dsh 为 ${JSON.stringify(enginesDsh)} —— 宿主 evaluatePluginCompatibility 按 semver 判定，非语义化版本（如误写成区间或空串）会让宿主抛错或整包跳过（PK-15）`);
+	const baseline = enginesDshBaseline(enginesDsh);
+	if (!baseline.ok) {
+		problems.push(`package.json: engines.dsh 为 ${JSON.stringify(enginesDsh)}（${baseline.reason}）—— 只允许精确版本 \`X.Y.Z[-pre]\` 或下界区间 \`>=X.Y.Z[-pre]\`；\`^\`/\`~\`/上下界区间/空串会让宿主语义含混或替未实测版本放行，一律禁止（PK-15）`);
 	} else if (declaredReleases === undefined || declaredReleases === null || typeof declaredReleases !== "object" || Array.isArray(declaredReleases)) {
 		problems.push(`package.json: 声明了 engines.dsh（${enginesDsh}）但缺少 dsh.compatibility.dshReleases 对象 —— README「支持的 dsh 版本」表与插件市场都读它；两边必须表达同一事实（PK-15）`);
-	} else if (!Object.hasOwn(declaredReleases, enginesDsh)) {
-		problems.push(`package.json: engines.dsh 钉的是 ${enginesDsh}，但 dsh.compatibility.dshReleases 里没有这一项（现有 ${Object.keys(declaredReleases).join(", ") || "空"}）—— 抬 pin 时忘了同步文档元数据：宿主按 engines.dsh 放行，读者的版本表却停在旧版本（PK-15）`);
+	} else if (!Object.hasOwn(declaredReleases, baseline.version)) {
+		problems.push(`package.json: engines.dsh ${baseline.form === "lower" ? `的下界` : ""}是 ${baseline.version}，但 dsh.compatibility.dshReleases 里没有这一项（现有 ${Object.keys(declaredReleases).join(", ") || "空"}）—— 抬 pin 时忘了同步文档元数据：宿主按下界放行，读者的版本表却停在旧版本（PK-15）`);
 	}
 } else if (declaredReleases !== undefined && declaredReleases !== null) {
 	// 反向：只写 dshReleases 不写 engines.dsh ⇒ 宿主忽略 peerDependencies 后「无条件放行」，
