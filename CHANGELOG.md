@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **宿主升级到 `0.2.2-rc.5` 后三个插件静默失效（pin 仍钉 `0.2.2-rc.3`）**（2026-11-19）：第六次同因复发（前五次为 v0.7.0 → 0.7.1、rc.3 → rc.5、rc.5 → 0.2.2-rc.1、rc.1 → rc.2、rc.2 → rc.3）。宿主升到 `0.2.2-rc.5` 后 `engines.dsh` 仍精确钉 `0.2.2-rc.3`，`evaluatePluginCompatibility` 判不兼容并把整包推进 `skippedBundles`，运行期不打印任何日志，tokstats / tokprev / promptopt 的 UI 整块消失。宿主真实版本以 asar 内 `@deepseek-ai/dsh-app-boot/package.json` 为准 = `0.2.2-rc.5`。
+  - **修法（并借此根治反复误伤）**：把 `engines.dsh` 从精确 pin 改为**只设下界**的区间 `>=0.2.2-rc.5`——同一系列的后续 rc 小版本不再因版本号被误挡，且不给未发布的未来版本预设上界。`dsh.compatibility.dshReleases` 增列 `0.2.2-rc.4` / `0.2.2-rc.5`（保留 `0.2.1-rc.3` / `0.2.1-rc.5` / `0.2.2-rc.1` / `rc.2` / `rc.3` 历史实测记录）。
+  - **裁决修订**：此前「精确 pin、不写区间」的依据是「宿主写区间会抛错或整包跳过」。2026-11-19 实测 `dsh-app-boot` 的 `evaluatePluginCompatibility` 实为 `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`（L1099-1100），区间判得对——该依据被证伪。精确 pin 的代价是六次假不兼容误伤（`lib/` 一行没改就被版本号挡在门外），收益（防未实测版本）可用「只设下界」在「向后兼容」语义下更小代价地达成。相应修订 `docs/MAINTAINING.md` 与 `docs/INVARIANTS.md` 的 PK-15，并改 `scripts/check-plugin-structure.js` 的 PK-15：接受精确值或 `>=` 下界区间，取基线版本核对 `dshReleases`，`^`/`~`/上下界区间/空串仍拦。
+  - **抬 pin 前逐条复核七条 host 契约（rc.5 asar 源码 + live Inspect 对读，七条全部成立）**：`rpc.handle` 仍两参（`dsh-client-connection/lib/index.js` L727）、`sessionProjections` 的 `init(header, inheritedEventCount)`（L73/L120）/ `wire`（L122）/ `snapshot`（L232）形状不变、`sessionPersistence` 仍返回 `revision`（`dsh-session-query/lib/index.js` L415）、`storageDomain.open(spec)` 仍接受手写 spec（`dsh-storage-domain/lib/index.js` L381）、`GenerateOptions.provider` / `model` 仍必填（`dsh-llm` 的 `prepareCall(provider, model, signal)` L1855）、四条 slot（`conversation.composer.dock` / `conversation.input.right` / `main` / `sidebar.panellist`）全在（live `Slots.listSubTree`）。另核实 `webServer.register`（`dsh-host-webserver/lib/index.js` L375）/ `sessionQuery.listSessions`·`readSession`（L95/L1128）仍在；`readPluginMeta` 在 `dsh-app-boot/lib/index.js` L3007。rc.3→rc.5 的 upgrade-guide 不触及本插件使用的任何面（rc.4 仅涉 web search 默认提供方、rc.3 仅涉 DeepSeek 拒答码），故为纯版本门槛、无真实 API 变更。
+  - **静态验证 PASS**：`node scripts/check-plugin-structure.js` → `OK: 3 个 patch 行 / 3 个注册插件`、零 WARN；`npm test` → 全通过、0 fail。PK-15 反向验证：`^0.2.2-rc.5` / `~0.2.2-rc.5` / `>=0.2.2-rc.5 <0.3.0` / 基线不在 dshReleases（`>=0.3.0`）四种形态均变红，精确值与 `>=` 下界区间均放行。本次引擎判定用宿主自带 `semver` 实测 `>=0.2.2-rc.5` 对 `0.2.2-rc.5` 返回 `true`。只动元数据、guard、文档，不碰 `lib/`、不抬 `stateVersion`、不清缓存，投影缓存与统计数据零损失。
+
 ## [0.11.0] - 2026-11-17
 
 ### Added
