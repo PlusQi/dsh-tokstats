@@ -1266,7 +1266,7 @@ test("projection 缺席：不注册单元，且不抛错（I8）", () => {
 	assert.equal(state.registered.length, 0);
 });
 
-test("RPC 注册：挂在 webServer 的 prefix 路由上，且**不**走 connection.rpc.handle", () => {
+test("RPC 注册（回退路径）：connection 无 rpc 面时挂 webServer prefix 路由 + 自建 admit", () => {
 	const connection = makeConnection();
 	const { ctx } = makeCtx({
 		connection,
@@ -1279,8 +1279,47 @@ test("RPC 注册：挂在 webServer 的 prefix 路由上，且**不**走 connect
 	assert.equal(route.path, TOKSTATS_CHANNEL);
 	// 前缀挂载：端点由通道自己认领（/summary、/promptopt）
 	assert.equal(route.kind, "prefix");
-	// connection 桩**没有** rpc 面：实现若回退到 connection.rpc.handle 会直接抛。
+	// connection 桩**没有** rpc 面：实现走回退分支（webServer.register + admit）。
 	assert.equal(connection.calls.admit, 0, "admit 只在真正请求时调用，注册阶段不碰它");
+});
+
+test("RPC 注册（官方路径）：connection.rpc.handle 存在时优先用它，不走 webServer 自建路由", () => {
+	const connection = makeConnection();
+	const handles = [];
+	connection.rpc = {
+		handle(channel, handler) {
+			handles.push({ channel, handler });
+			return () => {};
+		},
+	};
+	const { ctx } = makeCtx({
+		connection,
+		sessionQuery: makeSessionQuery([], {}),
+		sessionProjectionCache: makeProjectionCache({}),
+	});
+	startTokstats(ctx);
+	assert.equal(handles.length, 1, "应恰好注册一条官方通道");
+	assert.equal(handles[0].channel, TOKSTATS_CHANNEL);
+	assert.equal(connection.server.routes.length, 0, "官方路径不得再挂 webServer 自建路由");
+	assert.equal(connection.calls.admit, 0, "官方路径由 WebServer 准入，注册/请求阶段都不碰 admit");
+});
+
+test("RPC 官方路径：注册的 handler 收到 (endpoint,payload,signal) 并回 {ok:true,value}", async () => {
+	const connection = makeConnection();
+	const handles = [];
+	connection.rpc = {
+		handle(channel, handler) { handles.push({ channel, handler }); return () => {}; },
+	};
+	const { ctx } = makeCtx({
+		connection,
+		sessionQuery: makeSessionQuery([{ header: HEADER }], { [HEADER.id]: sampleLog(HEADER) }),
+		sessionProjectionCache: makeProjectionCache({}),
+	});
+	startTokstats(ctx);
+	assert.equal(handles.length, 1);
+	const result = await handles[0].handler(TOKSTATS_ENDPOINT, {}, undefined);
+	assert.equal(result.ok, true, "官方 handler 与自建路由共用同一 dispatch，成功返回 ok:true");
+	assert.ok(result.value !== undefined && result.value !== null, "summary 端点应回一个聚合值");
 });
 
 test("sessionQuery 缺席：RPC 不注册，且不抛错（I8 / AC-8）", () => {
